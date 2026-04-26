@@ -4,16 +4,18 @@
   "private": true,
   "workspaces": [
     "packages/*",
+    "next-app",
     "server",
     "web"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build -w packages/analyzer && npm run build -w packages/mcp && npm run build -w next-app",
     "build:analyzer": "npm run build -w packages/analyzer",
     "build:mcp": "npm run build -w packages/mcp",
-    "build:server": "npm run build -w server",
-    "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w web\"",
-    "start": "npm run start -w server"
+    "build:next": "npm run build -w next-app",
+    "dev": "npm run dev -w next-app",
+    "start": "npm run start -w next-app",
+    "dev:legacy": "concurrently \"npm run dev -w server\" \"npm run dev -w web\""
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
