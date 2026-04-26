@@ -1,0 +1,153 @@
+# Claude Code: Analyzer
+
+A local web app that parses Claude Code JSONL session logs to show token usage and cost broken down by session, turn, and project.
+
+![License](https://img.shields.io/badge/license-MIT-blue.svg)
+
+## Overview
+
+### Motivation
+
+Claude Code is a powerful AI coding assistant, but it gives you little built-in visibility into how much you're spending or which projects and sessions are consuming the most tokens during development. If you use Claude Code heavily across multiple projects especially with long agentic sessions, subagents, and tool calls, costs can accumulate quickly and opaquely.
+
+Claude Code Analyzer was built to bring useful insights hidden into claude's local project and session files in user friendly console. The goal is to give developers a clear, honest picture of their Claude Code usage: what it costs, where the tokens are going, and how efficiently the prompt cache is working, without sending any data anywhere outside your workstation.
+
+### Benefits
+
+- **Understand your spend** — see total cost broken down by project, session, and individual turn so you know exactly where your budget is going.
+- **Identify expensive sessions** — quickly surface sessions with high token counts, repeated limit hits, or poor cache efficiency.
+- **Track trends over time** — daily cost charts and forecasting help you spot usage spikes before they become bill surprises.
+- **Optimize caching** — cache hit rate stats show how effectively Anthropic's prompt cache is reducing your input costs.
+- **Debug sessions** — the full message timeline with tool calls, command outputs, hook results, and system events lets you replay exactly what happened in any session.
+- **Query from within Claude** — the built-in MCP server lets you ask Claude Code itself for a cost summary without leaving your terminal.
+
+### Local-only and private by design
+
+**Your session data never leaves your machine.** Claude Code Analyzer reads JSONL log files directly from `~/.claude/projects/` on your local filesystem. The Express API server and the React UI both run locally — there are no cloud services, no telemetry, no accounts, and no network requests to any external server.
+
+This means:
+
+- **Works offline** — fully functional without an internet connection. Once installed, no network access is required.
+- **No data sharing** — your prompts, code, tool outputs, and cost data stay on your machine.
+- **No authentication** — nothing to sign up for or log into.
+- **Auditable** — all parsing and cost calculation logic is open source and runs locally in your Node.js process.
+
+## Screenshots
+
+**Dashboard** — project overview with cost breakdown and forecasting
+
+![Dashboard](docs/Dashboard.png)
+
+**Project** — session list with token usage and cache efficiency
+
+![Project](docs/Project.png)
+
+**Session** — full message timeline with tool calls and per-turn cost
+
+![Session](docs/Session.png)
+
+## Features
+
+- Per-project and per-session token usage with cost breakdown
+- Turn-level message viewer with tool calls, hook results, and system caveats
+- Cache efficiency stats (cache read vs. write tokens)
+- Cost forecasting (weekly / monthly projection)
+- Active session monitor showing currently running Claude Code sessions
+- MCP server for querying usage data directly from any Claude Code session
+- `/usage-report` skill for a one-command cost summary
+
+## Architecture
+
+![Architecture](docs/architecture.svg)
+[Edit architecture diagram](docs/architecture.excalidraw) — open with [Excalidraw](https://excalidraw.com) (File → Open) or the VS Code Excalidraw extension.
+
+### Package overview
+
+| Package | Description |
+|---|---|
+| `packages/analyzer` | Core library: scans `~/.claude/projects/`, parses JSONL, computes costs, caches results in SQLite |
+| `packages/mcp` | MCP server exposing 6 query tools over stdio transport |
+| `server` | Express REST API (port 3001) serving analyzer data to the web UI |
+| `web` | Vite + React SPA (port 5173) — dashboard, project, and session views |
+
+### Data flow
+
+1. **Scan** — `scanner.ts` walks `~/.claude/projects/` and returns all `.jsonl` file paths with their project key and session ID.
+2. **Cache check** — `cache.ts` skips files whose `mtime` and `size` haven't changed since last parse.
+3. **Parse** — `parser.ts` reads each JSONL line, extracts `usage` blocks from assistant turns, and records token counts per model.
+4. **Cost** — `cost.ts` maps model names to per-token prices and computes a dollar cost for each turn.
+5. **Aggregate** — `aggregator.ts` groups turns into sessions and projects, computing totals and metadata.
+6. **Serve** — the Express server loads the aggregated result on startup and exposes REST endpoints; the React SPA fetches from these endpoints.
+
+## Requirements
+
+- Node.js 18+
+- Claude Code installed with sessions in `~/.claude/projects/`
+
+## Getting started
+
+```bash
+# Clone and install
+git clone https://github.com/your-username/claude-code-analyzer.git
+cd claude-code-analyzer
+npm install
+
+# Build all packages
+npm run build
+
+# Start the API server and web dev server
+npm run dev
+# API  → http://localhost:3001
+# Web  → http://localhost:5173
+```
+
+## MCP server setup
+
+The analyzer exposes a MCP server so you can query usage data from within any Claude Code session.
+
+### In this project
+
+Copy `.mcp.json.example` to `.mcp.json` and replace `<REPO_PATH>` with the absolute path to this repo:
+
+```bash
+cp .mcp.json.example .mcp.json
+# Edit .mcp.json and set the correct path
+```
+
+### From another project
+
+Add to that project's `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "usage-analyzer": {
+      "command": "node",
+      "args": ["/absolute/path/to/claude-code-analyzer/packages/mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+### Available MCP tools
+
+| Tool | Description |
+|---|---|
+| `get_usage_summary` | Total tokens + cost, filterable by project and days |
+| `get_project_breakdown` | All projects ranked by cost / tokens / sessions |
+| `get_session_list` | Sessions for a project |
+| `get_session_detail` | Per-turn breakdown for a session |
+| `get_cost_forecast` | Projected weekly / monthly cost |
+| `refresh_cache` | Re-scan JSONL files |
+
+## `/usage-report` skill
+
+Once the MCP server is configured, invoke `/usage-report` in any Claude Code session to get a formatted cost summary for the current project.
+
+## Cache
+
+Parsed data is cached at `~/.claude-analyzer/cache.db` (SQLite). Only files whose `mtime` or `size` has changed are re-parsed on subsequent runs. Use the **Refresh** button in the UI (or `POST /api/refresh`) to force a full re-scan.
+
+## License
+
+[MIT](LICENSE)

@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+packages/analyzer/dist/
+packages/analyzer/node_modules/
+packages/mcp/dist/
+packages/mcp/node_modules/
+server/dist/
+server/node_modules/
+web/dist/
+web/node_modules/
+
+# Local MCP config (contains absolute paths specific to your machine)
+.mcp.json
+
+# SQLite cache
+*.db
+*.db-shm
+*.db-wal
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/settings.json
+.idea/
+
+# Logs
+*.log
+npm-debug.log*

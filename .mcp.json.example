@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "usage-analyzer": {
+      "command": "node",
+      "args": ["/absolute/path/to/claude-code-analyzer/packages/mcp/dist/index.js"]
+    }
+  }
+}

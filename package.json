@@ -1,0 +1,21 @@
+{
+  "name": "claude-code-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "build:analyzer": "npm run build -w packages/analyzer",
+    "build:mcp": "npm run build -w packages/mcp",
+    "build:server": "npm run build -w server",
+    "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w web\"",
+    "start": "npm run start -w server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
