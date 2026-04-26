@@ -6,10 +6,6 @@ packages/analyzer/dist/
 packages/analyzer/node_modules/
 packages/mcp/dist/
 packages/mcp/node_modules/
-server/dist/
-server/node_modules/
-web/dist/
-web/node_modules/
 next-app/.next/
 next-app/out/
 next-app/node_modules/

@@ -7,8 +7,7 @@ Local app to inspect Claude Code JSONL session logs for token usage and cost per
 ```
 packages/analyzer/   Core JSONL parser + SQLite cache (~/.claude-analyzer/cache.db)
 packages/mcp/        MCP server (6 tools, stdio transport)
-server/              Express REST API on port 3001
-web/                 Vite + React SPA on port 5173
+next-app/            Next.js app — API routes + React UI (localhost:3000)
 ```
 
 ## Running the app
@@ -20,10 +19,9 @@ npm install
 # Build everything
 npm run build
 
-# Start API server + web dev server
+# Start the Next.js dev server (single command)
 npm run dev
-# → API: http://localhost:3001
-# → Web: http://localhost:5173
+# → http://localhost:3000
 ```
 
 ## MCP server

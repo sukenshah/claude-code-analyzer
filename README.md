@@ -23,7 +23,7 @@ Claude Code Analyzer was built to bring useful insights hidden into claude's loc
 
 ### Local-only and private by design
 
-**Your session data never leaves your machine.** Claude Code Analyzer reads JSONL log files directly from `~/.claude/projects/` on your local filesystem. The Express API server and the React UI both run locally — there are no cloud services, no telemetry, no accounts, and no network requests to any external server.
+**Your session data never leaves your machine.** Claude Code Analyzer reads JSONL log files directly from `~/.claude/projects/` on your local filesystem. The Next.js app runs entirely locally — there are no cloud services, no telemetry, no accounts, and no network requests to any external server.
 
 This means:
 
@@ -67,8 +67,7 @@ This means:
 |---|---|
 | `packages/analyzer` | Core library: scans `~/.claude/projects/`, parses JSONL, computes costs, caches results in SQLite |
 | `packages/mcp` | MCP server exposing 6 query tools over stdio transport |
-| `server` | Express REST API (port 3001) serving analyzer data to the web UI |
-| `web` | Vite + React SPA (port 5173) — dashboard, project, and session views |
+| `next-app` | Next.js app (port 3000) — API route handlers + React UI (dashboard, project, and session views) |
 
 ### Data flow
 
@@ -77,7 +76,7 @@ This means:
 3. **Parse** — `parser.ts` reads each JSONL line, extracts `usage` blocks from assistant turns, and records token counts per model.
 4. **Cost** — `cost.ts` maps model names to per-token prices and computes a dollar cost for each turn.
 5. **Aggregate** — `aggregator.ts` groups turns into sessions and projects, computing totals and metadata.
-6. **Serve** — the Express server loads the aggregated result on startup and exposes REST endpoints; the React SPA fetches from these endpoints.
+6. **Serve** — Next.js route handlers load the aggregated result on first request (held in an in-memory singleton) and expose REST endpoints under `/api/*`; the React client components fetch from these endpoints.
 
 ## Requirements
 
@@ -95,10 +94,9 @@ npm install
 # Build all packages
 npm run build
 
-# Start the API server and web dev server
+# Start the app (single command)
 npm run dev
-# API  → http://localhost:3001
-# Web  → http://localhost:5173
+# → http://localhost:3000
 ```
 
 ## MCP server setup

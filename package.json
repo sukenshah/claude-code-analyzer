@@ -4,9 +4,7 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "next-app",
-    "server",
-    "web"
+    "next-app"
   ],
   "scripts": {
     "build": "npm run build -w packages/analyzer && npm run build -w packages/mcp && npm run build -w next-app",
@@ -14,10 +12,6 @@
     "build:mcp": "npm run build -w packages/mcp",
     "build:next": "npm run build -w next-app",
     "dev": "npm run dev -w next-app",
-    "start": "npm run start -w next-app",
-    "dev:legacy": "concurrently \"npm run dev -w server\" \"npm run dev -w web\""
-  },
-  "devDependencies": {
-    "concurrently": "^9.0.0"
+    "start": "npm run start -w next-app"
   }
 }
