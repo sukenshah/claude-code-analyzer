@@ -1204,6 +1204,59 @@ code {
   color: var(--text2);
 }
 
+/* ── Prompt-level aggregated stats chip ───────────────────────── */
+.msg-prompt-stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.msg-prompt-models {
+  display: flex;
+  gap: 4px;
+}
+
+.msg-prompt-model {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg3));
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+.msg-prompt-divider {
+  display: inline-block;
+  width: 1px;
+  height: 10px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+.msg-prompt-stat { color: var(--text2); }
+
+.msg-prompt-cache { color: var(--green); }
+
+.msg-prompt-cache-write { color: var(--text2); opacity: 0.75; }
+
+.msg-prompt-turns { color: var(--text2); }
+
+.msg-prompt-cost {
+  font-weight: 600;
+  color: var(--text);
+  margin-left: auto;
+}
+
 .limit-hit-count {
   color: var(--red);
   font-weight: 600;

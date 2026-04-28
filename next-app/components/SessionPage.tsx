@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api, fmtCost, fmtTokens } from "@/lib/api";
@@ -8,6 +8,59 @@ import type { SessionDetail, RawMessage, TurnRecord, ToolUse } from "@/lib/types
 import { TokenBar } from "./TokenBar";
 import { Breadcrumb } from "./Breadcrumb";
 import { usePagination, Pagination } from "./Pagination";
+
+interface PromptStats {
+  models: string[];
+  input: number;
+  output: number;
+  cacheWrite: number;
+  cacheRead: number;
+  cacheHitPct: number;
+  cost: number;
+  turnCount: number;
+}
+
+function computePromptStats(
+  messages: RawMessage[],
+  allTurns: TurnRecord[],
+): Map<string, PromptStats> {
+  // Use timestamps to attribute ALL turns (including subagents) to user prompts.
+  // UUID matching only covers main-session turns; subagent turn UUIDs never appear
+  // in the main JSONL messages, so their costs would otherwise be silently dropped.
+  const headers = messages
+    .filter((m) => m.type === "user" || m.type === "summary")
+    .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+  if (headers.length === 0 || allTurns.length === 0) return new Map();
+
+  const result = new Map<string, PromptStats>();
+
+  for (let i = 0; i < headers.length; i++) {
+    const from = headers[i].timestamp;
+    const to = headers[i + 1]?.timestamp ?? null;
+
+    const groupTurns = allTurns.filter(
+      (t) => t.timestamp >= from && (to === null || t.timestamp < to),
+    );
+
+    if (groupTurns.length === 0) continue;
+
+    const models = [...new Set(groupTurns.map((t) => t.model))];
+    const input = groupTurns.reduce((s, t) => s + t.usage.input_tokens, 0);
+    const output = groupTurns.reduce((s, t) => s + t.usage.output_tokens, 0);
+    const cacheWrite = groupTurns.reduce((s, t) => s + t.usage.cache_creation_input_tokens, 0);
+    const cacheRead = groupTurns.reduce((s, t) => s + t.usage.cache_read_input_tokens, 0);
+    const cost = groupTurns.reduce((s, t) => s + t.cost.totalCost, 0);
+    const total = input + output + cacheWrite + cacheRead;
+    result.set(headers[i].uuid, {
+      models, input, output, cacheWrite, cacheRead,
+      cacheHitPct: total > 0 ? (cacheRead / total) * 100 : 0,
+      cost, turnCount: groupTurns.length,
+    });
+  }
+
+  return result;
+}
 
 export function SessionPage() {
   const params = useParams<{ id: string }>();
@@ -38,6 +91,14 @@ export function SessionPage() {
   }, [id]);
 
   const topLevelTurns = session ? session.turns.filter((t) => !t.isSubagent) : [];
+  const turnByUuid = new Map(topLevelTurns.map((t) => [t.uuid, t]));
+
+  const promptStatsMap = useMemo(
+    () => computePromptStats(messages ?? [], session?.turns ?? []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [messages, session],
+  );
+
   const filteredMessages = (messages ?? []).filter((m) => {
     const typeMatch = msgFilter === "all" || (msgFilter === "output" ? m.type === "tool_output" : m.type === msgFilter);
     if (!typeMatch) return false;
@@ -61,8 +122,6 @@ export function SessionPage() {
     cacheWriteCost: session.turns.reduce((s, t) => s + t.cost.cacheWriteCost, 0),
     cacheReadCost: session.turns.reduce((s, t) => s + t.cost.cacheReadCost, 0),
   };
-
-  const turnByUuid = new Map(topLevelTurns.map((t) => [t.uuid, t]));
 
   return (
     <div className="page">
@@ -195,7 +254,7 @@ export function SessionPage() {
         {messagesLoading
           ? <div className="loading" style={{ padding: "20px 0" }}>Loading…</div>
           : <>
-              <MessageList messages={pagedMessages} turnByUuid={turnByUuid} />
+              <MessageList messages={pagedMessages} turnByUuid={turnByUuid} promptStatsMap={promptStatsMap} />
               <Pagination page={msgPage} total={msgTotal} onChange={setMsgPage} />
             </>
         }
@@ -269,7 +328,11 @@ function SubagentSection({ agentId, turns, showTurns }: { agentId: string; turns
 
 const TRUNCATE_AT = 500;
 
-function MessageList({ messages, turnByUuid }: { messages: RawMessage[]; turnByUuid: Map<string, TurnRecord> }) {
+function MessageList({ messages, turnByUuid, promptStatsMap }: {
+  messages: RawMessage[];
+  turnByUuid: Map<string, TurnRecord>;
+  promptStatsMap: Map<string, PromptStats>;
+}) {
   if (messages.length === 0) return <p style={{ color: "var(--text2)", fontSize: 13 }}>No messages found.</p>;
   return (
     <div className="msg-list">
@@ -277,8 +340,41 @@ function MessageList({ messages, turnByUuid }: { messages: RawMessage[]; turnByU
         const turn = m.type === "tool_output"
           ? turnByUuid.get(m.parentAssistantUuid ?? "")
           : turnByUuid.get(m.uuid);
-        return <MessageRow key={m.uuid} message={m} turn={turn} />;
+        const promptStats = (m.type === "user" || m.type === "summary")
+          ? promptStatsMap.get(m.uuid)
+          : undefined;
+        return <MessageRow key={m.uuid} message={m} turn={turn} promptStats={promptStats} />;
       })}
+    </div>
+  );
+}
+
+function PromptStatsChip({ stats }: { stats: PromptStats }) {
+  return (
+    <div className="msg-prompt-stats">
+      <div className="msg-prompt-models">
+        {stats.models.map((m) => (
+          <span key={m} className="msg-prompt-model">{m.replace("claude-", "")}</span>
+        ))}
+      </div>
+      <span className="msg-prompt-divider" />
+      <span className="msg-prompt-stat">↓ {fmtK(stats.input)}</span>
+      <span className="msg-prompt-stat">↑ {fmtK(stats.output)}</span>
+      {stats.cacheRead > 0 && (
+        <span className="msg-prompt-stat msg-prompt-cache">
+          ⚡ {fmtK(stats.cacheRead)} cached ({stats.cacheHitPct.toFixed(0)}%)
+        </span>
+      )}
+      {stats.cacheWrite > 0 && (
+        <span className="msg-prompt-stat msg-prompt-cache-write">
+          +{fmtK(stats.cacheWrite)} written
+        </span>
+      )}
+      <span className="msg-prompt-divider" />
+      {stats.turnCount > 1 && (
+        <span className="msg-prompt-turns">{stats.turnCount} turns</span>
+      )}
+      <span className="msg-prompt-cost">{fmtCost(stats.cost)}</span>
     </div>
   );
 }
@@ -334,7 +430,7 @@ function ToolOutputRow({ message: m, turn }: { message: RawMessage; turn?: TurnR
   );
 }
 
-function MessageRow({ message: m, turn }: { message: RawMessage; turn?: TurnRecord }) {
+function MessageRow({ message: m, turn, promptStats }: { message: RawMessage; turn?: TurnRecord; promptStats?: PromptStats }) {
   if (m.type === "system") {
     if (m.subtype === "compact") {
       const meta = m.compactMeta;
@@ -439,6 +535,9 @@ function MessageRow({ message: m, turn }: { message: RawMessage; turn?: TurnReco
               </Fragment>
             ))}
           </div>
+        )}
+        {(m.type === "user" || m.type === "summary") && promptStats && (
+          <PromptStatsChip stats={promptStats} />
         )}
         {m.type === "assistant" && turn && (
           <div className="msg-turn-chip">
