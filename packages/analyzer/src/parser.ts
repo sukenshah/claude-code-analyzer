@@ -33,6 +33,7 @@ export function emptyMeta(): SessionMeta {
 
 export async function parseFile(entry: ScanEntry): Promise<{ turns: TurnRecord[]; meta: SessionMeta }> {
   const turns: TurnRecord[] = [];
+  const seenUuids = new Set<string>();
   const meta = emptyMeta();
   const mcpToolSet = new Set<string>();
 
@@ -106,8 +107,15 @@ export async function parseFile(entry: ScanEntry): Promise<{ turns: TurnRecord[]
       cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
     };
 
+    // Synthetic fallback includes agentId to prevent cross-file UUID collisions when the
+    // UUID field is absent: main file and subagent files share the same sessionId but
+    // each resets turns.length to 0, so without the agentId they'd generate identical keys.
+    const uuid = parsed.uuid ?? `${entry.sessionId}-${entry.agentId ?? "main"}-${turns.length}`;
+    if (seenUuids.has(uuid)) continue;
+    seenUuids.add(uuid);
+
     turns.push({
-      uuid: parsed.uuid ?? `${entry.sessionId}-${turns.length}`,
+      uuid,
       parentUuid: parsed.parentUuid ?? null,
       sessionId: parsed.sessionId ?? entry.sessionId,
       projectKey: entry.projectKey,

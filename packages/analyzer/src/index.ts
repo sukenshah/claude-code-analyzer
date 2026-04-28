@@ -14,6 +14,14 @@ export type { AnalyzerConfig } from "./config.js";
 
 export type ActiveSessionRecord = SessionRecord & { lastModifiedMs: number };
 
+function dedupTurnsByUuid(turns: TurnRecord[]): TurnRecord[] {
+  const seen = new Map<string, TurnRecord>();
+  for (const turn of turns) {
+    if (!seen.has(turn.uuid)) seen.set(turn.uuid, turn);
+  }
+  return [...seen.values()];
+}
+
 export async function getActiveSessions(thresholdMs = 10 * 60 * 1000): Promise<ActiveSessionRecord[]> {
   const now = Date.now();
   const entries = scanProjects();
@@ -69,7 +77,7 @@ export async function getActiveSessions(thresholdMs = 10 * 60 * 1000): Promise<A
     );
   }
 
-  const sessions = aggregateToSessions(allTurns, metaBySession);
+  const sessions = aggregateToSessions(dedupTurnsByUuid(allTurns), metaBySession);
 
   // Max mtime per session
   const sessionMtimes = new Map<string, number>();
@@ -131,9 +139,10 @@ export async function analyze(forceRefresh = false): Promise<AnalysisResult> {
   }
 
   const projectPaths = extractProjectPaths(entries);
-  const sessions = aggregateToSessions(allTurns, metaBySession);
+  const dedupedTurns = dedupTurnsByUuid(allTurns);
+  const sessions = aggregateToSessions(dedupedTurns, metaBySession);
   const projects = aggregateToProjects(sessions, projectPaths);
-  const summary = buildGlobalSummary(projects, allTurns);
+  const summary = buildGlobalSummary(projects, dedupedTurns);
 
-  return { projects, sessions, allTurns, summary, newFilesScanned };
+  return { projects, sessions, allTurns: dedupedTurns, summary, newFilesScanned };
 }
