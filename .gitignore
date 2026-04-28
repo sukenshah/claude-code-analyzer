@@ -10,6 +10,9 @@ next-app/.next/
 next-app/out/
 next-app/node_modules/
 
+# claude config
+.claude/
+
 # Local MCP config (contains absolute paths specific to your machine)
 .mcp.json
 
