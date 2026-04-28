@@ -1209,12 +1209,13 @@ code {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
   margin-top: 8px;
-  padding: 5px 8px;
+  padding: 6px 10px;
   border-radius: 6px;
   background: var(--bg3);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
   font-size: 11px;
   color: var(--text2);
 }
@@ -1229,9 +1230,9 @@ code {
   font-size: 10px;
   font-weight: 600;
   color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg3));
-  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
-  padding: 1px 5px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg3));
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  padding: 2px 6px;
   border-radius: 4px;
 }
 
@@ -1243,17 +1244,43 @@ code {
   flex-shrink: 0;
 }
 
-.msg-prompt-stat { color: var(--text2); }
+.msg-prompt-stat {
+  color: var(--text2);
+  background: color-mix(in srgb, var(--text2) 10%, var(--bg3));
+  padding: 2px 6px;
+  border-radius: 4px;
+}
 
-.msg-prompt-cache { color: var(--green); }
+.msg-prompt-cache {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, var(--bg3));
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
 
-.msg-prompt-cache-write { color: var(--text2); opacity: 0.75; }
+.msg-prompt-cache-write {
+  color: var(--text2);
+  background: color-mix(in srgb, var(--text2) 7%, var(--bg3));
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0.85;
+}
 
-.msg-prompt-turns { color: var(--text2); }
+.msg-prompt-turns {
+  color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 10%, var(--bg3));
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
 
 .msg-prompt-cost {
-  font-weight: 600;
-  color: var(--text);
+  font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg3));
+  padding: 2px 7px;
+  border-radius: 4px;
   margin-left: auto;
 }
 
