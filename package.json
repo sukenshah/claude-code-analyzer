@@ -12,8 +12,6 @@
     "build:mcp": "npm run build -w packages/mcp",
     "build:next": "npm run build -w next-app",
     "dev": "npm run dev -w next-app",
-    "start": "npm run start -w next-app",
-    "start:plugin": "bash scripts/start-plugin.sh --with-dashboard",
-    "stop:plugin": "lsof -ti:${MCP_HTTP_PORT:-3456} | xargs kill -9 2>/dev/null || echo 'No process on port ${MCP_HTTP_PORT:-3456}'"
+    "start": "npm run start -w next-app"
   }
 }
