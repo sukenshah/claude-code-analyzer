@@ -5,9 +5,10 @@
   "main": "dist/index.js",
   "files": ["dist"],
   "scripts": {
-    "build": "tsc",
+    "build": "npm install && tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "test": "npm run build && vitest run --coverage"
   },
   "dependencies": {
     "@claude-analyzer/analyzer": "*",

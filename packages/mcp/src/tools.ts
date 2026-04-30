@@ -12,16 +12,20 @@ export async function getResult(forceRefresh = false): Promise<AnalysisResult> {
   return cachedResult;
 }
 
-function fmtTokens(n: number): string {
+export function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
 
-function cutoffDate(days: number): string {
+export function cutoffDate(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() - days);
   return d.toISOString().slice(0, 10);
+}
+
+export function setCachedResult(r: AnalysisResult | null): void {
+  cachedResult = r;
 }
 
 export function registerTools(server: McpServer): void {
@@ -249,58 +253,6 @@ export function registerTools(server: McpServer): void {
       }
 
       return { content: [{ type: "text", text: lines.join("\n") }] };
-    }
-  );
-
-  // ── get_cost_forecast ───────────────────────────────────────────────────────
-
-  server.registerTool(
-    "get_cost_forecast",
-    {
-      description: "Forecast monthly cost based on recent usage patterns.",
-      inputSchema: {
-        project: z.string().optional().describe("Filter to a specific project. Omit for all."),
-        days: z.number().optional().default(7).describe("Historical window for forecast base (default 7 days)"),
-      },
-    },
-    async (input) => {
-      const result = await getResult();
-      const cutoff = cutoffDate(input.days ?? 7);
-
-      let turns = result.allTurns.filter((t) => t.timestamp.slice(0, 10) >= cutoff);
-      if (input.project) {
-        turns = turns.filter((t) => t.projectKey.toLowerCase().includes(input.project!.toLowerCase()));
-      }
-
-      const dailyCosts: Record<string, number> = {};
-      for (const turn of turns) {
-        const date = turn.timestamp.slice(0, 10);
-        dailyCosts[date] = (dailyCosts[date] ?? 0) + turn.cost.totalCost;
-      }
-
-      const days = Object.keys(dailyCosts);
-      if (!days.length) {
-        return { content: [{ type: "text", text: "No recent activity to forecast from." }] };
-      }
-
-      const totalCost = Object.values(dailyCosts).reduce((a, b) => a + b, 0);
-      const avgDailyCost = totalCost / (input.days ?? 7);
-      const projectedMonthly = avgDailyCost * 30;
-      const projectedWeekly = avgDailyCost * 7;
-
-      const scope = input.project ? `project: ${input.project}` : "all projects";
-      const text = [
-        `Cost Forecast (${scope}, based on last ${input.days ?? 7} days)`,
-        ``,
-        `Active days in window: ${days.length}`,
-        `Total in window:       ${formatCost(totalCost)}`,
-        `Avg daily cost:        ${formatCost(avgDailyCost)}`,
-        ``,
-        `Projected weekly:      ${formatCost(projectedWeekly)}`,
-        `Projected monthly:     ${formatCost(projectedMonthly)}`,
-      ].join("\n");
-
-      return { content: [{ type: "text", text }] };
     }
   );
 

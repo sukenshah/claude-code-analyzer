@@ -6,6 +6,10 @@
     "packages/*",
     "next-app"
   ],
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.1.0",
+    "vitest": "^3.1.0"
+  },
   "scripts": {
     "build": "npm run build -w packages/analyzer && npm run build -w packages/mcp && npm run build -w next-app",
     "build:analyzer": "npm run build -w packages/analyzer",

@@ -11,9 +11,9 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "npm install && tsc",
     "dev": "tsx src/index.ts",
-    "test-parse": "tsx src/test-parse.ts"
+    "test": "npm run build && vitest run --coverage"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0"

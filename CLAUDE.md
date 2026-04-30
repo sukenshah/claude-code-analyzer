@@ -6,7 +6,7 @@ Local app to inspect Claude Code JSONL session logs for token usage and cost per
 
 ```
 packages/analyzer/   Core JSONL parser + SQLite cache (~/.claude-analyzer/cache.db)
-packages/mcp/        MCP server (6 tools, stdio transport)
+packages/mcp/        MCP server (5 tools, stdio transport)
 next-app/            Next.js app — API routes + React UI (localhost:3737)
 ```
 
@@ -45,7 +45,6 @@ To use from another project, add to their `.mcp.json`:
 - `get_project_breakdown` — all projects ranked by cost/tokens/sessions
 - `get_session_list` — sessions for a project
 - `get_session_detail` — per-turn breakdown for a session
-- `get_cost_forecast` — projected weekly/monthly cost
 - `refresh_cache` — re-scan JSONL files
 
 ## Skill

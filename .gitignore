@@ -10,6 +10,10 @@ next-app/.next/
 next-app/out/
 next-app/node_modules/
 
+# Test outputs
+packages/analyzer/coverage
+packages/mcp/coverage
+
 # claude config
 .claude/
 
