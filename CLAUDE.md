@@ -7,7 +7,7 @@ Local app to inspect Claude Code JSONL session logs for token usage and cost per
 ```
 packages/analyzer/   Core JSONL parser + SQLite cache (~/.claude-analyzer/cache.db)
 packages/mcp/        MCP server (6 tools, stdio transport)
-next-app/            Next.js app — API routes + React UI (localhost:3000)
+next-app/            Next.js app — API routes + React UI (localhost:3737)
 ```
 
 ## Running the app
@@ -21,7 +21,7 @@ npm run build
 
 # Start the Next.js dev server (single command)
 npm run dev
-# → http://localhost:3000
+# → http://localhost:3737
 ```
 
 ## MCP server

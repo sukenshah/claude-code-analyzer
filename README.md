@@ -53,7 +53,7 @@ This means:
 - Cache efficiency stats (cache read vs. write tokens)
 - Cost forecasting (weekly / monthly projection)
 - Active session monitor showing currently running Claude Code sessions
-- MCP server for querying usage data directly from any Claude Code session
+- MCP server for querying usage data directly from any Claude Code session (stdio + HTTP)
 - `/usage-report` skill for a one-command cost summary
 
 ## Architecture
@@ -66,7 +66,7 @@ This means:
 | Package | Description |
 |---|---|
 | `packages/analyzer` | Core library: scans `~/.claude/projects/`, parses JSONL, computes costs, caches results in SQLite |
-| `packages/mcp` | MCP server exposing 6 query tools over stdio transport |
+| `packages/mcp` | MCP server exposing 6 query tools over stdio (Claude Code) and HTTP (Claude.ai plugin) |
 | `next-app` | Next.js app (port 3000) — API route handlers + React UI (dashboard, project, and session views) |
 
 ### Data flow
@@ -96,12 +96,12 @@ npm run build
 
 # Start the app (single command)
 npm run dev
-# → http://localhost:3000
+# → http://localhost:3737
 ```
 
-## MCP server setup
+## MCP server (Claude Code — stdio)
 
-The analyzer exposes a MCP server so you can query usage data from within any Claude Code session.
+The analyzer exposes an MCP server for querying usage data from within any Claude Code session.
 
 ### In this project
 
@@ -127,6 +127,26 @@ Add to that project's `.mcp.json`:
 }
 ```
 
+### Sample prompts (Claude Code)
+
+Ask these in any Claude Code session with the MCP configured:
+
+```
+How much have I spent on Claude Code this week?
+```
+```
+Show me my most expensive projects over the last 30 days.
+```
+```
+Which session cost the most yesterday? Break down its token usage.
+```
+```
+What's my projected monthly Claude Code bill at my current usage rate?
+```
+```
+How efficient is my prompt cache? Show cache hit rate by project.
+```
+
 ### Available MCP tools
 
 | Tool | Description |
@@ -137,6 +157,62 @@ Add to that project's `.mcp.json`:
 | `get_session_detail` | Per-turn breakdown for a session |
 | `get_cost_forecast` | Projected weekly / monthly cost |
 | `refresh_cache` | Re-scan JSONL files |
+
+
+## Claude.ai plugin (HTTP server)
+
+Run the analyzer as a remote MCP plugin accessible from Claude.ai chat.
+
+### Installation
+
+```bash
+# Clone and install
+git clone https://github.com/your-username/claude-code-analyzer.git
+cd claude-code-analyzer
+
+# Build and start (auto-installs deps, registers in ~/.claude.json, starts server)
+npm run start:plugin
+```
+
+The script:
+1. Builds all packages if sources are newer than the dist
+2. Registers `usage-analyzer` in `~/.claude.json` so Claude Code picks it up globally (restart Claude Code after first run)
+3. Starts the MCP HTTP server on port `3456` (override with `MCP_HTTP_PORT=XXXX`)
+
+### With dashboard
+
+```bash
+# Start plugin server + Next.js dashboard together
+npm run start:all
+# Plugin: http://localhost:3456/mcp
+# Dashboard: http://localhost:3737
+```
+
+### Stop the server
+
+```bash
+npm run stop:plugin
+```
+
+### Sample prompts (Claude.ai)
+
+Once the plugin is registered, the same 6 text tools are available from Claude.ai chat:
+
+```
+How much have I spent on Claude Code this week?
+```
+```
+Show me my most expensive projects over the last 30 days.
+```
+```
+Which session cost the most? Break down its token usage.
+```
+```
+What's my projected monthly Claude Code bill at my current usage rate?
+```
+```
+How efficient is my prompt cache? Show cache hit rate by project.
+```
 
 ## `/usage-report` skill
 
