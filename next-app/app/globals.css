@@ -80,6 +80,7 @@ body {
   align-items: center;
 }
 
+
 .btn-theme {
   background: var(--bg2);
   border: 1px solid var(--border);
@@ -1517,4 +1518,129 @@ code {
   .page { padding: 16px; }
   .nav { padding: 0 16px; }
   .config-banner-form { flex-direction: column; }
+  .cost-compare-grid { flex-direction: column; }
 }
+
+/* ── Compaction Report ────────────────────────────────────────── */
+.page-subtitle {
+  font-size: 13px;
+  color: var(--text2);
+  margin: 4px 0 0;
+  max-width: 680px;
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.back-link {
+  font-size: 13px;
+  color: var(--text2);
+  text-decoration: none;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.back-link:hover { color: var(--accent); }
+
+.page-error {
+  padding: 32px;
+  color: var(--red);
+  font-size: 14px;
+}
+
+.page-loading {
+  padding: 48px;
+  text-align: center;
+  color: var(--text2);
+  font-size: 14px;
+}
+
+.stat-sub {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 4px;
+  text-align: center;
+}
+
+.section-desc {
+  font-size: 13px;
+  color: var(--text2);
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.compaction-empty {
+  color: var(--text2);
+  font-size: 14px;
+  padding: 32px;
+  text-align: center;
+}
+
+/* cost comparison two-block layout */
+.cost-compare-grid {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.cost-compare-block {
+  flex: 1;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  text-align: center;
+}
+
+.cost-compare-compacted {
+  border-color: color-mix(in srgb, var(--red) 40%, var(--border));
+  background: color-mix(in srgb, var(--red) 5%, var(--bg2));
+}
+
+.cost-compare-clean {
+  border-color: color-mix(in srgb, var(--green) 40%, var(--border));
+  background: color-mix(in srgb, var(--green) 5%, var(--bg2));
+}
+
+.cost-compare-label {
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text2);
+  margin-bottom: 8px;
+}
+
+.cost-compare-value {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.5px;
+}
+
+.cost-compare-sub {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 6px;
+}
+
+.cost-compare-vs {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+  white-space: nowrap;
+  text-align: center;
+  min-width: 80px;
+}
+
+.compact-session-fraction {
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.project-link {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.project-link:hover { color: var(--accent); }
