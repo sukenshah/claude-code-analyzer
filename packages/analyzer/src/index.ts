@@ -1,7 +1,7 @@
 import { statSync } from "fs";
 import { scanProjects, extractProjectPaths } from "./scanner.js";
 import { parseFile } from "./parser.js";
-import { aggregateToSessions, aggregateToProjects, buildGlobalSummary } from "./aggregator.js";
+import { aggregateToSessions, aggregateToProjects, buildGlobalSummary, mergeMeta } from "./aggregator.js";
 import { isFileCached, saveTurns, loadCachedTurns, loadCachedMeta } from "./cache.js";
 import type { TurnRecord, SessionRecord, ProjectRecord, GlobalSummary, SessionMeta } from "./types.js";
 
@@ -61,20 +61,7 @@ export async function getActiveSessions(thresholdMs = 10 * 60 * 1000): Promise<A
 
     allTurns.push(...turns);
     const existing = metaBySession.get(entry.sessionId);
-    metaBySession.set(entry.sessionId, existing
-      ? {
-          aiTitle: existing.aiTitle ?? meta.aiTitle,
-          entrypoint: existing.entrypoint ?? meta.entrypoint,
-          gitBranch: existing.gitBranch ?? meta.gitBranch,
-          permissionMode: existing.permissionMode ?? meta.permissionMode,
-          version: existing.version ?? meta.version,
-          mcpTools: [...new Set([...existing.mcpTools, ...meta.mcpTools])],
-          compactEvents: [...existing.compactEvents, ...meta.compactEvents]
-            .sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
-          limitHitCount: (existing.limitHitCount ?? 0) + (meta.limitHitCount ?? 0),
-        }
-      : meta
-    );
+    metaBySession.set(entry.sessionId, existing ? mergeMeta(existing, meta) : meta);
   }
 
   const sessions = aggregateToSessions(dedupTurnsByUuid(allTurns), metaBySession);

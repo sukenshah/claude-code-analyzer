@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api, fmtCost, fmtTokens } from "@/lib/api";
-import type { ProjectDetail, ClaudeMdFile } from "@/lib/types";
+import type { ProjectDetail, ClaudeMdFile, SessionSummary } from "@/lib/types";
 import { TokenBar } from "./TokenBar";
 import { Breadcrumb } from "./Breadcrumb";
 import { usePagination, Pagination } from "./Pagination";
@@ -128,6 +128,8 @@ export function ProjectPage() {
         </section>
       )}
 
+      <McpToolSection sessions={project.sessions} />
+
       <section className="card">
         <div className="section-header">
           <h2>
@@ -191,5 +193,62 @@ export function ProjectPage() {
         <Pagination page={sessionsPage} total={sessionsTotal} onChange={setSessionsPage} />
       </section>
     </div>
+  );
+}
+
+function McpToolSection({ sessions }: { sessions: SessionSummary[] }) {
+  const totals: Record<string, number> = {};
+  for (const s of sessions) {
+    for (const [tool, count] of Object.entries(s.meta.mcpToolCalls ?? {})) {
+      totals[tool] = (totals[tool] ?? 0) + count;
+    }
+  }
+
+  const rows = Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  if (rows.length === 0) return null;
+
+  const maxCount = rows[0]?.[1] ?? 1;
+
+  return (
+    <section className="card">
+      <h2>MCP Tool Usage</h2>
+      <p className="section-desc">
+        Tool call frequency across all sessions. High-frequency external MCP calls add latency and may carry API costs from the MCP server provider.
+      </p>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Tool</th>
+            <th>Server</th>
+            <th>Calls</th>
+            <th>Share</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([tool, count]) => {
+            const server = tool.match(/^mcp__([^_]+)__/)?.[1] ?? "";
+            const name = tool.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
+            return (
+              <tr key={tool}>
+                <td><code>{name}</code></td>
+                <td><span className="badge">{server}</span></td>
+                <td>{count}</td>
+                <td>
+                  <div className="model-cost-cell">
+                    <span>{((count / maxCount) * 100).toFixed(0)}%</span>
+                    <div className="model-share-bar-track">
+                      <div
+                        className="model-share-bar-fill"
+                        style={{ width: `${(count / maxCount) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </section>
   );
 }

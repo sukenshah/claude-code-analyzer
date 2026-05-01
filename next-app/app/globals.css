@@ -1575,6 +1575,42 @@ code {
   text-align: center;
 }
 
+/* ── MCP tool frequency (session page) ───────────────────────── */
+.mcp-tool-freq {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.mcp-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.mcp-tool-count {
+  min-width: 28px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--text1);
+}
+
+.mcp-tool-name {
+  color: var(--text1);
+}
+
+.mcp-tool-server {
+  font-size: 11px;
+  color: var(--text2);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+
 /* ── Context limit diagnosis badges ──────────────────────────── */
 .diag-badge {
   display: inline-block;

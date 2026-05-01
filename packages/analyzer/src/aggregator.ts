@@ -4,7 +4,15 @@ import { scanClaudeMd } from "./claude-md.js";
 import { emptyMeta } from "./parser.js";
 import type { TurnRecord, SessionRecord, ProjectRecord, GlobalSummary, DailyStats, SessionMeta } from "./types.js";
 
-function mergeMeta(a: SessionMeta, b: SessionMeta): SessionMeta {
+export function mergeToolCallCounts(a: Record<string, number>, b: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = { ...a };
+  for (const [k, v] of Object.entries(b)) {
+    out[k] = (out[k] ?? 0) + v;
+  }
+  return out;
+}
+
+export function mergeMeta(a: SessionMeta, b: SessionMeta): SessionMeta {
   return {
     aiTitle: a.aiTitle ?? b.aiTitle,
     entrypoint: a.entrypoint ?? b.entrypoint,
@@ -12,6 +20,7 @@ function mergeMeta(a: SessionMeta, b: SessionMeta): SessionMeta {
     permissionMode: a.permissionMode ?? b.permissionMode,
     version: a.version ?? b.version,
     mcpTools: [...new Set([...a.mcpTools, ...b.mcpTools])],
+    mcpToolCalls: mergeToolCallCounts(a.mcpToolCalls ?? {}, b.mcpToolCalls ?? {}),
     compactEvents: [...a.compactEvents, ...b.compactEvents]
       .sort((x, y) => x.timestamp.localeCompare(y.timestamp)),
     limitHitCount: (a.limitHitCount ?? 0) + (b.limitHitCount ?? 0),

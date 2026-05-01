@@ -202,9 +202,29 @@ export function SessionPage() {
               <span className="meta-value mono">{session.meta.version}</span>
             </div>
           )}
-          {session.meta.mcpTools.length > 0 && (
+          {Object.keys(session.meta.mcpToolCalls ?? {}).length > 0 && (
             <div className="meta-row meta-row-wrap">
-              <span className="meta-label">MCP tools</span>
+              <span className="meta-label">MCP tool calls</span>
+              <div className="mcp-tool-freq">
+                {Object.entries(session.meta.mcpToolCalls ?? {})
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([tool, count]) => {
+                    const label = tool.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
+                    const server = tool.match(/^mcp__([^_]+)__/)?.[1] ?? "";
+                    return (
+                      <div key={tool} className="mcp-tool-row" title={tool}>
+                        <span className="mcp-tool-count">{count}</span>
+                        <span className="mcp-tool-name">{label}</span>
+                        {server && <span className="mcp-tool-server">{server}</span>}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+          {session.meta.mcpTools.length > 0 && Object.keys(session.meta.mcpToolCalls ?? {}).length === 0 && (
+            <div className="meta-row meta-row-wrap">
+              <span className="meta-label">MCP tools (available)</span>
               <div className="meta-tags">
                 {session.meta.mcpTools.map((t) => (
                   <span key={t} className="badge">{t.replace("mcp__", "")}</span>

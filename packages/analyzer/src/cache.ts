@@ -167,6 +167,7 @@ export function loadCachedMeta(filePath: string): SessionMeta {
   try {
     const parsed = JSON.parse(row.meta_json) as SessionMeta;
     parsed.limitHitCount = parsed.limitHitCount ?? 0;
+    parsed.mcpToolCalls = parsed.mcpToolCalls ?? {};
     return parsed;
   } catch { return emptyMeta(); }
 }

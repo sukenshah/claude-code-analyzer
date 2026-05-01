@@ -33,6 +33,7 @@ export interface SessionMeta {
   permissionMode: string | null;
   version: string | null;
   mcpTools: string[];
+  mcpToolCalls: Record<string, number>;
   compactEvents: CompactEvent[];
   limitHitCount: number;
 }

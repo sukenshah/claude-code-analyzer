@@ -24,11 +24,11 @@ interface RawLine {
   version?: string;
   attachment?: { type?: string; addedNames?: string[] };
   compactMetadata?: { trigger?: string; preTokens?: number; postTokens?: number; durationMs?: number };
-  message?: { model?: string; usage?: RawUsage; content?: Array<{ type?: string; text?: string }> };
+  message?: { model?: string; usage?: RawUsage; content?: Array<{ type?: string; text?: string; name?: string }> };
 }
 
 export function emptyMeta(): SessionMeta {
-  return { aiTitle: null, entrypoint: null, gitBranch: null, permissionMode: null, version: null, mcpTools: [], compactEvents: [], limitHitCount: 0 };
+  return { aiTitle: null, entrypoint: null, gitBranch: null, permissionMode: null, version: null, mcpTools: [], mcpToolCalls: {}, compactEvents: [], limitHitCount: 0 };
 }
 
 export async function parseFile(entry: ScanEntry): Promise<{ turns: TurnRecord[]; meta: SessionMeta }> {
@@ -81,6 +81,15 @@ export async function parseFile(entry: ScanEntry): Promise<{ turns: TurnRecord[]
         durationMs: parsed.compactMetadata.durationMs ?? 0,
       };
       meta.compactEvents.push(ev);
+    }
+
+    // Count MCP tool calls from assistant tool_use blocks
+    if (parsed.type === "assistant") {
+      for (const block of parsed.message?.content ?? []) {
+        if (block.type === "tool_use" && block.name?.startsWith("mcp__")) {
+          meta.mcpToolCalls[block.name] = (meta.mcpToolCalls[block.name] ?? 0) + 1;
+        }
+      }
     }
 
     // Detect synthetic "You've hit your limit" messages
