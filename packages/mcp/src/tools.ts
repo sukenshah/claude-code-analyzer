@@ -256,6 +256,105 @@ export function registerTools(server: McpServer): void {
     }
   );
 
+  // ── get_spend_trend ─────────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_spend_trend",
+    {
+      description:
+        "Analyze spend trends: daily burn rate, week-over-week comparison, and projected monthly spend. " +
+        "Use this to understand if usage is growing and estimate end-of-month costs.",
+      inputSchema: {
+        days: z.number().optional().default(30).describe("Lookback window for the daily chart in days (default 30). Use 0 for all time."),
+        project: z.string().optional().describe("Project name to filter. Omit for all projects."),
+      },
+    },
+    async (input) => {
+      const result = await getResult();
+      let turns = result.allTurns;
+      if (input.project) {
+        turns = turns.filter((t) =>
+          t.projectKey.toLowerCase().includes(input.project!.toLowerCase())
+        );
+      }
+
+      if (!turns.length) {
+        return { content: [{ type: "text", text: "No data found for the given filters." }] };
+      }
+
+      const dailyMap = new Map<string, number>();
+      for (const t of turns) {
+        const date = t.timestamp.slice(0, 10);
+        dailyMap.set(date, (dailyMap.get(date) ?? 0) + t.cost.totalCost);
+      }
+
+      const now = new Date();
+      const today = now.toISOString().slice(0, 10);
+      const DAY = 86400000;
+
+      const last7 = Array.from({ length: 7 }, (_, i) =>
+        new Date(Date.now() - i * DAY).toISOString().slice(0, 10)
+      );
+      const prev7 = Array.from({ length: 7 }, (_, i) =>
+        new Date(Date.now() - (i + 7) * DAY).toISOString().slice(0, 10)
+      );
+
+      const thisWeekCost = last7.reduce((s, d) => s + (dailyMap.get(d) ?? 0), 0);
+      const prevWeekCost = prev7.reduce((s, d) => s + (dailyMap.get(d) ?? 0), 0);
+      const avgDaily7 = thisWeekCost / 7;
+      const weekDelta = prevWeekCost > 0
+        ? ((thisWeekCost - prevWeekCost) / prevWeekCost) * 100
+        : null;
+
+      const monthPrefix = today.slice(0, 7);
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const dayOfMonth = now.getDate();
+      const monthSoFar = [...dailyMap.entries()]
+        .filter(([d]) => d.startsWith(monthPrefix))
+        .reduce((s, [, c]) => s + c, 0);
+      const projectedMonth = dayOfMonth > 0 ? (monthSoFar / dayOfMonth) * daysInMonth : 0;
+
+      const peakEntry = [...dailyMap.entries()].sort((a, b) => b[1] - a[1])[0];
+      const peakCost = peakEntry?.[1] ?? 1;
+
+      const allDates = [...dailyMap.keys()].sort();
+      const cutoff = input.days && input.days > 0 ? cutoffDate(input.days) : null;
+      const recentDates = cutoff ? allDates.filter((d) => d >= cutoff) : allDates;
+      const rows = recentDates.map((d) => {
+        const cost = dailyMap.get(d)!;
+        const bar = "█".repeat(Math.max(1, Math.round((cost / peakCost) * 20)));
+        return `  ${d}  ${formatCost(cost).padStart(8)}  ${bar}`;
+      });
+
+      const deltaStr = weekDelta !== null
+        ? `${weekDelta > 0 ? "▲" : "▼"} ${Math.abs(weekDelta).toFixed(1)}% ${weekDelta > 0 ? "more" : "less"} than prior week`
+        : "n/a (no prior week data)";
+
+      const scope = input.project ? `project: ${input.project}` : "all projects";
+      const text = [
+        `Spend Trend (${scope})`,
+        ``,
+        `── Burn Rate ─────────────────────────────────────────`,
+        `7-day avg:        ${formatCost(avgDaily7)}/day`,
+        `This week (7d):   ${formatCost(thisWeekCost)}`,
+        `Prior week (7d):  ${formatCost(prevWeekCost)}`,
+        `Trend:            ${deltaStr}`,
+        ``,
+        `── This Month (${monthPrefix}) ────────────────────────`,
+        `Spent so far:     ${formatCost(monthSoFar)}  (${dayOfMonth} of ${daysInMonth} days elapsed)`,
+        `Projected total:  ${formatCost(projectedMonth)}`,
+        ``,
+        peakEntry ? `── Peak Day ──────────────────────────────────────────` : "",
+        peakEntry ? `${peakEntry[0]}  ${formatCost(peakEntry[1])}` : "",
+        ``,
+        `── Daily (last ${recentDates.length} days) ───────────────────────────`,
+        ...rows,
+      ].filter(Boolean).join("\n");
+
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
   // ── refresh_cache ───────────────────────────────────────────────────────────
 
   server.registerTool(

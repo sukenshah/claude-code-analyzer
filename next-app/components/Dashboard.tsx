@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { api, fmtCost, fmtTokens, totalTokens } from "@/lib/api";
@@ -24,6 +24,29 @@ export function Dashboard() {
   const [mounted, setMounted] = useState(false);
   const { page: projectsPage, setPage: setProjectsPage, paged: pagedProjects, total: projectsTotal } = usePagination(projects);
   const { plan, setPlanId } = usePlan();
+
+  const trendData = useMemo(() => {
+    if (!summary) return null;
+    const now = new Date();
+    const DAY = 86400000;
+    const dailyByDate = new Map(summary.dailyStats.map((d) => [d.date, d.cost]));
+    const last7Cost = Array.from({ length: 7 }, (_, i) =>
+      new Date(Date.now() - i * DAY).toISOString().slice(0, 10)
+    ).reduce((s, d) => s + (dailyByDate.get(d) ?? 0), 0);
+    const prev7Cost = Array.from({ length: 7 }, (_, i) =>
+      new Date(Date.now() - (i + 7) * DAY).toISOString().slice(0, 10)
+    ).reduce((s, d) => s + (dailyByDate.get(d) ?? 0), 0);
+    const avgDaily7 = last7Cost / 7;
+    const weekDelta = prev7Cost > 0 ? ((last7Cost - prev7Cost) / prev7Cost) * 100 : null;
+    const monthPrefix = now.toISOString().slice(0, 7);
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+    const monthSoFar = summary.dailyStats
+      .filter((d) => d.date.startsWith(monthPrefix))
+      .reduce((s, d) => s + d.cost, 0);
+    const projectedMonth = dayOfMonth > 0 ? (monthSoFar / dayOfMonth) * daysInMonth : 0;
+    return { avgDaily7, weekDelta, projectedMonth };
+  }, [summary]);
 
   useEffect(() => { setMounted(true); }, []);
 
@@ -69,6 +92,8 @@ export function Dashboard() {
 
   const last30 = summary.dailyStats.slice(-30);
   const models = Object.entries(summary.byModel).sort((a, b) => b[1].cost - a[1].cost);
+
+  const { avgDaily7, weekDelta, projectedMonth } = trendData!;
   const cacheHitRate = totalTokens(summary.totals) > 0
     ? ((summary.totals.cache_read_input_tokens / totalTokens(summary.totals)) * 100).toFixed(1)
     : "0.0";
@@ -218,6 +243,26 @@ export function Dashboard() {
         <section className="card">
           <h2>Daily Cost (last 30 days)</h2>
           <Sparkline data={last30} width={420} height={80} />
+          <div className="trend-stats">
+            <div className="trend-stat">
+              <span className="trend-label">7-day avg</span>
+              <span className={`trend-value ${plan.isSubscription ? "cost-muted" : ""}`}>
+                {fmtCost(avgDaily7)}/day
+              </span>
+            </div>
+            <div className="trend-stat">
+              <span className="trend-label">vs prev week</span>
+              <span className={`trend-value ${weekDelta === null ? "" : weekDelta > 5 ? "trend-up" : weekDelta < -5 ? "trend-down" : ""}`}>
+                {weekDelta === null ? "—" : `${weekDelta > 0 ? "▲" : "▼"} ${Math.abs(weekDelta).toFixed(0)}%`}
+              </span>
+            </div>
+            <div className="trend-stat">
+              <span className="trend-label">month projection</span>
+              <span className={`trend-value ${plan.isSubscription ? "cost-muted" : ""}`}>
+                {fmtCost(projectedMonth)}
+              </span>
+            </div>
+          </div>
         </section>
 
         <section className="card">
