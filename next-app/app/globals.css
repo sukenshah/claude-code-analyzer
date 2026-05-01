@@ -521,6 +521,106 @@ body {
 .trend-up { color: var(--red); }
 .trend-down { color: var(--green); }
 
+/* ── Model table cells ────────────────────────────────────────── */
+.model-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.model-token-sub {
+  font-size: 11px;
+  color: var(--text2);
+}
+
+.model-cost-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 80px;
+}
+
+.model-share-bar-track {
+  width: 100%;
+  height: 4px;
+  background: var(--bg3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.model-share-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.card-header-row h2 { margin-bottom: 0; }
+
+.model-compare-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-compare-label {
+  font-size: 11px;
+  color: var(--text2);
+  white-space: nowrap;
+}
+
+.model-compare-select {
+  appearance: none;
+  background: var(--bg3)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23706B62'/%3E%3C/svg%3E")
+    no-repeat right 8px center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  padding: 4px 24px 4px 8px;
+  cursor: pointer;
+  outline: none;
+}
+
+.model-compare-select:hover,
+.model-compare-select:focus { border-color: var(--accent); }
+
+[data-theme="dark"] .model-compare-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23998F82'/%3E%3C/svg%3E");
+  color-scheme: dark;
+}
+
+.model-baseline-tag {
+  font-size: 11px;
+  color: var(--text2);
+  font-style: italic;
+}
+
+.model-delta-better { color: var(--green); font-weight: 500; }
+.model-delta-worse  { color: var(--red);   font-weight: 500; }
+
+.model-sim-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text2);
+}
+
+.model-sim-summary strong { color: var(--text); }
+
 /* ── Buttons ──────────────────────────────────────────────────── */
 .sort-buttons {
   display: flex;

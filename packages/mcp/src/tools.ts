@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { analyze, formatCost } from "@claude-analyzer/analyzer";
+import { analyze, formatCost, calculateCost } from "@claude-analyzer/analyzer";
 import type { AnalysisResult } from "@claude-analyzer/analyzer";
 
 let cachedResult: AnalysisResult | null = null;
@@ -350,6 +350,103 @@ export function registerTools(server: McpServer): void {
         `── Daily (last ${recentDates.length} days) ───────────────────────────`,
         ...rows,
       ].filter(Boolean).join("\n");
+
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
+  // ── get_model_breakdown ──────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_model_breakdown",
+    {
+      description:
+        "Show cost and token share per model, plus a cost simulator showing what your usage would have cost " +
+        "on a different model (default: claude-sonnet-4-6). Useful for identifying if you're over-spending on Opus.",
+      inputSchema: {
+        compare_to: z.string().optional().default("claude-sonnet-4-6")
+          .describe("Model to simulate costs against (default: claude-sonnet-4-6)."),
+        days: z.number().optional().default(0).describe("Lookback window in days (default 0 = all time)."),
+      },
+    },
+    async (input) => {
+      const result = await getResult();
+      const cutoff = input.days && input.days > 0 ? cutoffDate(input.days) : null;
+
+      let turns = result.allTurns;
+      if (cutoff) turns = turns.filter((t) => t.timestamp.slice(0, 10) >= cutoff);
+
+      if (!turns.length) {
+        return { content: [{ type: "text", text: "No data found for the given filters." }] };
+      }
+
+      // Aggregate usage + cost per model from actual turns (respects cutoff)
+      const byModel = new Map<string, { input: number; output: number; cacheWrite: number; cacheRead: number; actualCost: number }>();
+      for (const t of turns) {
+        const m = t.model === "<synthetic>" ? null : t.model;
+        if (!m) continue;
+        const e = byModel.get(m) ?? { input: 0, output: 0, cacheWrite: 0, cacheRead: 0, actualCost: 0 };
+        e.input     += t.usage.input_tokens;
+        e.output    += t.usage.output_tokens;
+        e.cacheWrite += t.usage.cache_creation_input_tokens;
+        e.cacheRead  += t.usage.cache_read_input_tokens;
+        e.actualCost += t.cost.totalCost;
+        byModel.set(m, e);
+      }
+
+      const totalCost = [...byModel.values()].reduce((s, e) => s + e.actualCost, 0);
+      const totalTokens = [...byModel.values()].reduce((s, e) => s + e.input + e.output + e.cacheWrite + e.cacheRead, 0);
+
+      const compareTo = input.compare_to ?? "claude-sonnet-4-6";
+
+      // Sort by actual cost descending
+      const rows = [...byModel.entries()]
+        .sort((a, b) => b[1].actualCost - a[1].actualCost)
+        .map(([model, e]) => {
+          const tokens = e.input + e.output + e.cacheWrite + e.cacheRead;
+          const costPct = totalCost > 0 ? (e.actualCost / totalCost * 100).toFixed(1) : "0.0";
+          const tokenPct = totalTokens > 0 ? (tokens / totalTokens * 100).toFixed(1) : "0.0";
+
+          const simCost = calculateCost(
+            { input_tokens: e.input, output_tokens: e.output, cache_creation_input_tokens: e.cacheWrite, cache_read_input_tokens: e.cacheRead },
+            compareTo
+          ).totalCost;
+          const savings = e.actualCost - simCost;
+          const isCompareTo = model === compareTo || model.startsWith(compareTo);
+          const simStr = isCompareTo ? "  (baseline)" : `  → ${formatCost(simCost)} on ${compareTo.replace("claude-", "")}  ${savings > 0.01 ? `saves ${formatCost(savings)}` : savings < -0.01 ? `costs ${formatCost(-savings)} more` : "≈ same"}`;
+
+          return [
+            `  ${model.replace("claude-", "").padEnd(32)} ${formatCost(e.actualCost).padStart(10)}  ${costPct.padStart(5)}%  ${fmtTokens(tokens).padStart(7)} tokens  ${tokenPct.padStart(5)}%`,
+            `  ${"".padEnd(32)} ${simStr}`,
+          ].join("\n");
+        });
+
+      const simTotal = [...byModel.entries()].reduce((s, [, e]) => {
+        return s + calculateCost(
+          { input_tokens: e.input, output_tokens: e.output, cache_creation_input_tokens: e.cacheWrite, cache_read_input_tokens: e.cacheRead },
+          compareTo
+        ).totalCost;
+      }, 0);
+      const totalSavings = totalCost - simTotal;
+
+      const window = input.days && input.days > 0 ? `last ${input.days} days` : "all time";
+      const text = [
+        `Model Breakdown (${window})`,
+        ``,
+        `  ${"Model".padEnd(32)} ${"Actual Cost".padStart(10)}  Share   Tokens          Share`,
+        `  ${"─".repeat(80)}`,
+        rows.join("\n"),
+        `  ${"─".repeat(80)}`,
+        `  ${"TOTAL".padEnd(32)} ${formatCost(totalCost).padStart(10)}  100%    ${fmtTokens(totalTokens).padStart(7)} tokens  100%`,
+        ``,
+        `── If everything ran on ${compareTo.replace("claude-", "")} ────────────────────────────────`,
+        `  Simulated total:  ${formatCost(simTotal)}`,
+        totalSavings > 0.01
+          ? `  Potential savings: ${formatCost(totalSavings)}  (${(totalSavings / totalCost * 100).toFixed(1)}% cheaper)`
+          : totalSavings < -0.01
+          ? `  Additional cost:   ${formatCost(-totalSavings)}  (${(-totalSavings / totalCost * 100).toFixed(1)}% more expensive)`
+          : `  Cost is approximately the same.`,
+      ].join("\n");
 
       return { content: [{ type: "text", text }] };
     }

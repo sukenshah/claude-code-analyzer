@@ -10,6 +10,7 @@ import { InfoModal } from "./InfoModal";
 import { ActiveSessions } from "./ActiveSessions";
 import { usePagination, Pagination } from "./Pagination";
 import { PLANS, usePlan } from "@/hooks/usePlan";
+import { simulateCost, COMPARE_MODELS } from "@/lib/pricing";
 
 type ModalKey = "totalCost" | "turns" | "cacheHitRate" | "totalTokens" | null;
 
@@ -24,6 +25,7 @@ export function Dashboard() {
   const [mounted, setMounted] = useState(false);
   const { page: projectsPage, setPage: setProjectsPage, paged: pagedProjects, total: projectsTotal } = usePagination(projects);
   const { plan, setPlanId } = usePlan();
+  const [compareModel, setCompareModel] = useState(COMPARE_MODELS[1]!.id);
 
   const trendData = useMemo(() => {
     if (!summary) return null;
@@ -266,21 +268,85 @@ export function Dashboard() {
         </section>
 
         <section className="card">
-          <h2>By Model</h2>
-          <table className="table">
-            <thead>
-              <tr><th>Model</th><th>Tokens</th><th>{plan.isSubscription ? "API-Equiv Cost" : "Cost"}</th></tr>
-            </thead>
-            <tbody>
-              {models.map(([model, stats]) => (
-                <tr key={model}>
-                  <td><code>{model.replace("claude-", "")}</code></td>
-                  <td>{fmtTokens(stats.usage.input_tokens + stats.usage.output_tokens)}</td>
-                  <td className={plan.isSubscription ? "cost-muted" : ""}>{fmtCost(stats.cost)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="card-header-row">
+            <h2>By Model</h2>
+            <div className="model-compare-control">
+              <span className="model-compare-label">Compare to</span>
+              <select
+                className="model-compare-select"
+                value={compareModel}
+                onChange={(e) => setCompareModel(e.target.value)}
+                aria-label="Comparison model"
+              >
+                {COMPARE_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {(() => {
+            const rows = models.filter(([model]) => model !== "<synthetic>");
+            const simTotal = rows.reduce((s, [, stats]) => s + simulateCost(stats.usage, compareModel), 0);
+            const actualTotal = rows.reduce((s, [, stats]) => s + stats.cost, 0);
+            const totalDelta = simTotal - actualTotal;
+            const compareLabel = COMPARE_MODELS.find((m) => m.id === compareModel)?.label ?? compareModel;
+            return (
+              <>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Model</th>
+                      <th>{plan.isSubscription ? "API-Equiv Cost" : "Cost"}</th>
+                      <th>vs {compareLabel}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(([model, stats]) => {
+                      const costPct = summary.totalCost > 0 ? (stats.cost / summary.totalCost) * 100 : 0;
+                      const sim = simulateCost(stats.usage, compareModel);
+                      const delta = sim - stats.cost;
+                      const isBaseline = model === compareModel || model.startsWith(compareModel);
+                      return (
+                        <tr key={model}>
+                          <td>
+                            <div className="model-name-cell">
+                              <code>{model.replace("claude-", "")}</code>
+                              <span className="model-token-sub">{fmtTokens(stats.usage.input_tokens + stats.usage.output_tokens)}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="model-cost-cell">
+                              <span className={plan.isSubscription ? "cost-muted" : ""}>{fmtCost(stats.cost)}</span>
+                              <div className="model-share-bar-track">
+                                <div className="model-share-bar-fill" style={{ width: `${costPct}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            {isBaseline
+                              ? <span className="model-baseline-tag">baseline</span>
+                              : <span className={delta > 0.005 ? "model-delta-worse" : delta < -0.005 ? "model-delta-better" : ""}>
+                                  {delta > 0 ? "+" : ""}{fmtCost(delta)}
+                                </span>
+                            }
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {!rows.every(([m]) => m === compareModel || m.startsWith(compareModel)) && (
+                  <div className="model-sim-summary">
+                    <span>All on {compareLabel}:</span>
+                    <span className={plan.isSubscription ? "cost-muted" : ""}><strong>{fmtCost(simTotal)}</strong></span>
+                    <span className={totalDelta > 0.01 ? "model-delta-worse" : totalDelta < -0.01 ? "model-delta-better" : ""}>
+                      {Math.abs(totalDelta) < 0.01 ? "≈ same" : totalDelta > 0 ? `+${fmtCost(totalDelta)}` : `${fmtCost(totalDelta)} saved`}
+                    </span>
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </section>
       </div>
 
