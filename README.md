@@ -56,6 +56,28 @@ This means:
 - MCP server for querying usage data directly from any Claude Code session
 - `/usage-report` skill for a one-command cost summary
 
+### Context Limit Report
+
+Surfaces which projects and sessions hit Claude's context window limit most often. Useful for identifying workflows that routinely exhaust the context window — a signal to break sessions up, use compaction, or restructure prompts. Shows per-project and per-session limit hit counts with direct links to the offending sessions.
+
+![Context Limit Report](docs/ContextLimitReport.png)
+
+### Compaction Report
+
+Shows where Claude Code's automatic context compaction is firing and what it costs you. Tracks total compaction events per project, average tokens lost per compaction, and compares the cost of compacted vs. clean sessions side-by-side. Helps you decide whether compaction is saving money or whether sessions are just too long.
+
+![Compaction Report](docs/CompactionReport.png)
+
+### Auto Memory per project
+
+Each project page now shows the contents of Claude Code's auto memory for that project (`~/.claude/projects/<key>/memory/MEMORY.md`). Auto memory is the set of notes Claude writes itself across sessions — build commands, debugging insights, architecture notes, and preferences it discovers. Surfacing it here lets you audit what Claude has learned and spot entries that may be outdated or incorrect.
+
+### MCP Tool Usage per project
+
+Each project page includes a breakdown of MCP tool calls made across all sessions. Shows tool name, which MCP server it belongs to, total call count, and relative share. Useful for identifying high-frequency external tool calls that add latency or carry third-party API costs.
+
+![MCP Tool Usage](docs/MCPToolUsage.png)
+
 ## Architecture
 
 ![Architecture](docs/architecture.svg)
