@@ -1,4 +1,4 @@
-import type { GlobalSummary, ProjectSummary, ProjectDetail, SessionDetail, ActiveSession, RawMessage, AppConfig } from "./types";
+import type { GlobalSummary, ProjectSummary, ProjectDetail, SessionDetail, ActiveSession, RawMessage, AppConfig, ProjectMemory } from "./types";
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
@@ -15,6 +15,7 @@ export const api = {
   refresh: () => fetch("/api/refresh", { method: "POST" }).then((r) => r.json()),
   activeSessions: () => get<ActiveSession[]>("/api/active-sessions"),
   config: () => get<AppConfig>("/api/config"),
+  projectMemory: (key: string) => get<ProjectMemory>(`/api/projects/${encodeURIComponent(key)}/memory`),
   saveConfig: (claudeProjectsDir: string) =>
     fetch("/api/config", {
       method: "POST",

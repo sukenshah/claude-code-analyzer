@@ -345,6 +345,32 @@ body {
 
 .section-header h2 { margin-bottom: 0; }
 
+.collapsible-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  margin-bottom: 0;
+}
+
+.collapsible-header h2 { margin-bottom: 0; flex: 1; }
+
+.collapsible-header:hover h2 { color: var(--accent); }
+
+.collapse-chevron {
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text2);
+  margin-left: 8px;
+  line-height: 1;
+  flex-shrink: 0;
+  width: 16px;
+  text-align: center;
+}
+
+.collapsible-body { margin-top: 16px; }
+
 /* ── Search input ─────────────────────────────────────────────── */
 .search-input {
   width: 100%;

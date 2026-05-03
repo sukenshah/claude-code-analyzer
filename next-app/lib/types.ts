@@ -78,6 +78,18 @@ export interface ClaudeMdSummary {
   totalPerSessionCostUsd: number;
 }
 
+export interface MemoryTopicFile {
+  fileName: string;
+  sizeBytes: number;
+}
+
+export interface ProjectMemory {
+  exists: boolean;
+  mainContentHtml: string | null;
+  mainContentIsEmpty: boolean;
+  topicFiles: MemoryTopicFile[];
+}
+
 export interface ProjectSummary {
   projectKey: string;
   projectName: string;

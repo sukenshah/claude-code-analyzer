@@ -4,15 +4,40 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { api, fmtCost, fmtTokens } from "@/lib/api";
-import type { ProjectDetail, ClaudeMdFile, SessionSummary } from "@/lib/types";
+import type { ProjectDetail, ClaudeMdFile, SessionSummary, ProjectMemory } from "@/lib/types";
 import { TokenBar } from "./TokenBar";
 import { Breadcrumb } from "./Breadcrumb";
 import { usePagination, Pagination } from "./Pagination";
+
+function CollapsibleCard({
+  title,
+  children,
+  defaultOpen = true,
+  headerExtra,
+}: {
+  title: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  headerExtra?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="card">
+      <div className="collapsible-header" onClick={() => setOpen((o) => !o)}>
+        <h2>{title}</h2>
+        {headerExtra && <div onClick={(e) => e.stopPropagation()}>{headerExtra}</div>}
+        <span className="collapse-chevron">{open ? "−" : "+"}</span>
+      </div>
+      {open && <div className="collapsible-body">{children}</div>}
+    </section>
+  );
+}
 
 export function ProjectPage() {
   const params = useParams<{ key: string }>();
   const key = params?.key;
   const [project, setProject] = useState<ProjectDetail | null>(null);
+  const [memory, setMemory] = useState<ProjectMemory | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sort, setSort] = useState<"date" | "cost" | "tokens">("date");
   const [search, setSearch] = useState("");
@@ -22,6 +47,9 @@ export function ProjectPage() {
     api.project(decodeURIComponent(key))
       .then(setProject)
       .catch((e) => setError(String(e)));
+    api.projectMemory(decodeURIComponent(key))
+      .then(setMemory)
+      .catch(() => { /* memory is optional */ });
   }, [key]);
 
   const sessions = project
@@ -87,8 +115,7 @@ export function ProjectPage() {
       </section>
 
       {project.claudeMd.files.length > 0 && (
-        <section className="card">
-          <h2>CLAUDE.md Context Overhead</h2>
+        <CollapsibleCard title="CLAUDE.md Context Overhead">
           <p className="claude-md-note">
             Each session loads these files into the system prompt. Estimated tokens and per-session cost use the Sonnet 4.6 input rate ($3/M tokens).
           </p>
@@ -125,26 +152,30 @@ export function ProjectPage() {
             Across {project.sessionCount} sessions: ~{fmtCost(project.claudeMd.totalPerSessionCostUsd * project.sessionCount)} cumulative context overhead
             ({((project.claudeMd.totalPerSessionCostUsd * project.sessionCount / (project.totalCost || 1)) * 100).toFixed(1)}% of total project cost)
           </p>
-        </section>
+        </CollapsibleCard>
       )}
+
+      <AutoMemorySection memory={memory} />
 
       <McpToolSection sessions={project.sessions} />
 
-      <section className="card">
-        <div className="section-header">
-          <h2>
-            Sessions
-            {search
-              ? ` (${sessionsTotal} of ${project.sessionCount})`
-              : ` (${project.sessionCount})`}
-          </h2>
+      <CollapsibleCard
+        title={
+          search
+            ? `Sessions (${sessionsTotal} of ${project.sessionCount})`
+            : `Sessions (${project.sessionCount})`
+        }
+        headerExtra={
           <div className="sort-buttons">
             Sort:
             {(["date", "cost", "tokens"] as const).map((s) => (
-              <button key={s} className={`btn-sort ${sort === s ? "active" : ""}`} onClick={() => setSort(s)}>{s.charAt(0).toUpperCase() + s.slice(1)}</button>
+              <button key={s} className={`btn-sort ${sort === s ? "active" : ""}`} onClick={() => setSort(s)}>
+                {s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
             ))}
           </div>
-        </div>
+        }
+      >
         <input
           className="search-input"
           type="search"
@@ -191,8 +222,50 @@ export function ProjectPage() {
           </tbody>
         </table>
         <Pagination page={sessionsPage} total={sessionsTotal} onChange={setSessionsPage} />
-      </section>
+      </CollapsibleCard>
     </div>
+  );
+}
+
+function AutoMemorySection({ memory }: { memory: ProjectMemory | null }) {
+  if (!memory || !memory.exists) return null;
+
+  return (
+    <CollapsibleCard title="Auto Memory">
+      <p className="section-desc">
+        Notes Claude Code wrote automatically for this project, stored at{" "}
+        <code>~/.claude/projects/…/memory/</code>.
+      </p>
+
+      {memory.mainContentHtml ? (
+        <div
+          className="info-page-body"
+          style={{ maxWidth: "none", margin: 0 }}
+          dangerouslySetInnerHTML={{ __html: memory.mainContentHtml }}
+        />
+      ) : memory.mainContentIsEmpty ? (
+        <p className="claude-md-note">MEMORY.md exists but has no content yet.</p>
+      ) : (
+        <p className="claude-md-note">No MEMORY.md found in memory directory.</p>
+      )}
+
+      {memory.topicFiles.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 20, marginBottom: 8, fontSize: 13, fontWeight: 600 }}>Topic Files</h3>
+          <table className="table">
+            <thead><tr><th>File</th><th>Size</th></tr></thead>
+            <tbody>
+              {memory.topicFiles.map(f => (
+                <tr key={f.fileName}>
+                  <td><code>{f.fileName}</code></td>
+                  <td>{(f.sizeBytes / 1024).toFixed(1)} KB</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+    </CollapsibleCard>
   );
 }
 
@@ -210,8 +283,7 @@ function McpToolSection({ sessions }: { sessions: SessionSummary[] }) {
   const maxCount = rows[0]?.[1] ?? 1;
 
   return (
-    <section className="card">
-      <h2>MCP Tool Usage</h2>
+    <CollapsibleCard title="MCP Tool Usage">
       <p className="section-desc">
         Tool call frequency across all sessions. High-frequency external MCP calls add latency and may carry API costs from the MCP server provider.
       </p>
@@ -249,6 +321,6 @@ function McpToolSection({ sessions }: { sessions: SessionSummary[] }) {
           })}
         </tbody>
       </table>
-    </section>
+    </CollapsibleCard>
   );
 }
