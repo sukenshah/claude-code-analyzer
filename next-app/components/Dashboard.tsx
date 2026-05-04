@@ -9,7 +9,8 @@ import { Sparkline } from "./Sparkline";
 import { InfoModal } from "./InfoModal";
 import { ActiveSessions } from "./ActiveSessions";
 import { usePagination, Pagination } from "./Pagination";
-import { PLANS, usePlan } from "@/hooks/usePlan";
+import { usePlan } from "@/hooks/usePlan";
+import { NavRefreshPopover } from "./NavRefreshPopover";
 import { simulateCost, COMPARE_MODELS } from "@/lib/pricing";
 
 type ModalKey = "totalCost" | "turns" | "cacheHitRate" | "totalTokens" | null;
@@ -105,32 +106,15 @@ export function Dashboard() {
   return (
     <div className="page">
       {navActionsEl && createPortal(
-        <div className="refresh-controls">
-          <select
-            className="plan-select"
-            value={plan.id}
-            onChange={(e) => setPlanId(e.target.value as typeof plan.id)}
-            aria-label="Claude plan"
-          >
-            {PLANS.map((p) => (
-              <option key={p.id} value={p.id}>{p.label}</option>
-            ))}
-          </select>
-          <div className="btn-group" role="group" aria-label="Auto-refresh interval">
-            {([0, 120, 300, 600] as const).map((interval) => (
-              <button
-                key={interval}
-                className={`btn-interval ${autoRefresh === interval ? "active" : ""}`}
-                onClick={() => setAutoRefresh(interval)}
-              >
-                {interval === 0 ? "Manual" : `${interval / 60}m`}
-              </button>
-            ))}
-          </div>
-          <button className="btn-secondary" onClick={handleRefresh} disabled={refreshing}>
-            {refreshing ? "Refreshing…" : countdown > 0 ? `Refresh (${countdown}s)` : "Refresh"}
-          </button>
-        </div>,
+        <NavRefreshPopover
+          plan={plan}
+          onPlanChange={(id) => setPlanId(id)}
+          autoRefresh={autoRefresh}
+          onAutoRefreshChange={setAutoRefresh}
+          onRefresh={handleRefresh}
+          refreshing={refreshing}
+          countdown={countdown}
+        />,
         navActionsEl
       )}
 

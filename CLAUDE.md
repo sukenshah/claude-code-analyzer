@@ -2,6 +2,17 @@
 
 Local app to inspect Claude Code JSONL session logs for token usage and cost per session, per prompt, and per project.
 
+## Working Style
+
+## Exploration Discipline
+- Before running multiple bash/Read commands to explore, state your hypothesis and the minimum commands needed
+- If the user asks for analysis based on existing context, answer from context first — do not re-read files unless necessary
+
+## Project Memory MCP
+- ALWAYS use the project-memory MCP tools to list/save insights — do NOT query the DB directly or use ToolSearch
+- If project-memory MCP tools are unavailable, STOP and report the server health issue rather than attempting workarounds
+- After adding a new tool to an MCP server, the server MUST be reloaded before the tool can be used
+
 ## Architecture
 
 ```
