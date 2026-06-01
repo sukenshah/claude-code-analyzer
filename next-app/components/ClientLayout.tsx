@@ -61,6 +61,14 @@ function SunIcon() {
   );
 }
 
+function QualityIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l2.4 6.9H22l-6 4.4 2.3 7L12 16.9 5.7 20.3 8 13.3l-6-4.4h7.6z" />
+    </svg>
+  );
+}
+
 function InfoIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -115,6 +123,9 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
             <div id="nav-actions" />
             <Link href="/insights" className="btn-theme" aria-label="Insights" title="Insights">
               <InsightsIcon />
+            </Link>
+            <Link href="/quality" className="btn-theme" aria-label="Session Quality" title="Session Quality">
+              <QualityIcon />
             </Link>
             <Link href="/plans" className="btn-theme" aria-label="Plans" title="Plans">
               <PlansIcon />

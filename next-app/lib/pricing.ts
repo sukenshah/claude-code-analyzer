@@ -6,6 +6,7 @@ interface ModelPricing {
 }
 
 const PRICING: Record<string, ModelPricing> = {
+  "claude-opus-4-8":              { input: 15,   output: 75,   cacheWrite: 18.75, cacheRead: 1.50 },
   "claude-opus-4-7":              { input: 15,   output: 75,   cacheWrite: 18.75, cacheRead: 1.50 },
   "claude-opus-4-5":              { input: 15,   output: 75,   cacheWrite: 18.75, cacheRead: 1.50 },
   "claude-sonnet-4-6":            { input: 3,    output: 15,   cacheWrite: 3.75,  cacheRead: 0.30 },
@@ -29,7 +30,7 @@ function getPricing(model: string): ModelPricing {
     if (/claude-3-haiku/.test(model)) return PRICING["claude-3-haiku-20240307"]!;
     return PRICING["claude-haiku-4-5"]!;
   }
-  if (model.includes("opus")) return PRICING["claude-opus-4-7"]!;
+  if (model.includes("opus")) return PRICING["claude-opus-4-8"]!;
   return PRICING["claude-sonnet-4-6"]!;
 }
 
@@ -60,4 +61,5 @@ export const COMPARE_MODELS: CompareOption[] = [
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
   { id: "claude-sonnet-4-6",         label: "Sonnet 4.6" },
   { id: "claude-opus-4-7",           label: "Opus 4.7" },
+  { id: "claude-opus-4-8",           label: "Opus 4.8" },
 ];

@@ -13,6 +13,7 @@ const PRICING: Record<string, ModelPricing> = {
   "claude-sonnet-4-5": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
   "claude-haiku-4-5":  { input: 0.80, output: 4, cacheWrite: 1, cacheRead: 0.08 },
   "claude-haiku-4-5-20251001": { input: 0.80, output: 4, cacheWrite: 1, cacheRead: 0.08 },
+  "claude-opus-4-8":   { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.50 },
   "claude-opus-4-7":   { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.50 },
   "claude-opus-4-5":   { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.50 },
   // Claude 3.5
@@ -38,7 +39,7 @@ function getPricing(model: string): ModelPricing {
     if (/claude-3-haiku/.test(model)) return PRICING["claude-3-haiku-20240307"]!;
     return PRICING["claude-haiku-4-5"]!;
   }
-  if (model.includes("opus")) return PRICING["claude-opus-4-7"]!;
+  if (model.includes("opus")) return PRICING["claude-opus-4-8"]!;
   return DEFAULT_PRICING;
 }
 

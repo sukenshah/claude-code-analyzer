@@ -1744,3 +1744,27 @@ code {
 }
 
 .project-link:hover { color: var(--accent); }
+
+/* Session Quality report */
+.quality-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 720px) {
+  .quality-two-col { grid-template-columns: 1fr; }
+}
+.q-pos   { color: var(--green); font-weight: 500; }
+.q-warn  { color: var(--orange); font-weight: 500; }
+.q-neg   { color: var(--red); font-weight: 500; }
+.q-muted { color: var(--text2); }
+
+/* allow long stat labels to wrap to two lines instead of truncating */
+.stat-label-wrap {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  flex-wrap: wrap;
+  text-align: center;
+  line-height: 1.3;
+}

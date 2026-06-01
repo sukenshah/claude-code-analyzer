@@ -48,6 +48,15 @@ describe("calculateCost", () => {
     expect(cost.inputCost).toBe(15);
   });
 
+  test("opus-4-8 pricing", () => {
+    const usage: TokenUsage = { input_tokens: 1_000_000, output_tokens: 1_000_000, cache_creation_input_tokens: 1_000_000, cache_read_input_tokens: 1_000_000 };
+    const cost = calculateCost(usage, "claude-opus-4-8");
+    expect(cost.inputCost).toBe(15);
+    expect(cost.outputCost).toBe(75);
+    expect(cost.cacheWriteCost).toBe(18.75);
+    expect(cost.cacheReadCost).toBe(1.50);
+  });
+
   test("unknown model falls back to sonnet-4-6 default", () => {
     const usage: TokenUsage = { ...zero, input_tokens: 1_000_000 };
     const unknown = calculateCost(usage, "totally-unknown-model-xyz");
