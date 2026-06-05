@@ -1,6 +1,9 @@
+import { readdirSync, readFileSync } from "fs";
+import { join } from "path";
+import { homedir } from "os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { analyze, formatCost, calculateCost } from "@claude-analyzer/analyzer";
+import { analyze, formatCost, calculateCost, getActiveSessions } from "@claude-analyzer/analyzer";
 import type { AnalysisResult } from "@claude-analyzer/analyzer";
 
 let cachedResult: AnalysisResult | null = null;
@@ -26,6 +29,67 @@ export function cutoffDate(days: number): string {
 
 export function setCachedResult(r: AnalysisResult | null): void {
   cachedResult = r;
+}
+
+export function fmtPct(n: number): string {
+  return `${n.toFixed(0)}%`;
+}
+
+// ── Session-quality facet/meta files (written by Claude Code) ─────────────────
+
+interface FacetFile {
+  session_id: string;
+  outcome?: string;
+  claude_helpfulness?: string;
+  session_type?: string;
+  friction_counts?: Record<string, number>;
+  friction_detail?: string;
+  primary_success?: string;
+  brief_summary?: string;
+}
+
+interface MetaFile {
+  session_id: string;
+  project_path?: string;
+  start_time?: string;
+  duration_minutes?: number;
+  uses_task_agent?: boolean;
+  uses_mcp?: boolean;
+  uses_web_search?: boolean;
+  uses_web_fetch?: boolean;
+}
+
+function readUsageDataDir<T>(sub: string): T[] {
+  const dir = join(homedir(), ".claude", "usage-data", sub);
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((n: string) => n.endsWith(".json"));
+  } catch {
+    return [];
+  }
+  const out: T[] = [];
+  for (const n of names) {
+    try {
+      out.push(JSON.parse(readFileSync(join(dir, n), "utf-8")) as T);
+    } catch {
+      /* skip malformed file */
+    }
+  }
+  return out;
+}
+
+const ACHIEVED = new Set(["fully_achieved", "mostly_achieved"]);
+
+function distroLines(counts: Record<string, number>, indent = "  "): string[] {
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  const total = entries.reduce((s, [, v]) => s + v, 0);
+  if (total === 0) return [`${indent}(none)`];
+  return entries.map(([k, v]) => {
+    const label = k.replace(/_/g, " ");
+    const pct = ((v / total) * 100).toFixed(0);
+    const bar = "█".repeat(Math.max(1, Math.round((v / total) * 20)));
+    return `${indent}${label.padEnd(28)} ${String(v).padStart(4)}  ${pct.padStart(3)}%  ${bar}`;
+  });
 }
 
 export function registerTools(server: McpServer): void {
@@ -446,6 +510,343 @@ export function registerTools(server: McpServer): void {
           : totalSavings < -0.01
           ? `  Additional cost:   ${formatCost(-totalSavings)}  (${(-totalSavings / totalCost * 100).toFixed(1)}% more expensive)`
           : `  Cost is approximately the same.`,
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
+  // ── get_session_quality ──────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_session_quality",
+    {
+      description:
+        "Qualitative session scoring Claude Code writes per session: success rate (goals achieved), " +
+        "friction rate, outcome/helpfulness distributions, feature adoption (sub-agents/MCP/web), and " +
+        "the most friction-heavy sessions with Claude's own notes on what went wrong. " +
+        "Reads facet + session-meta files from ~/.claude/usage-data.",
+      inputSchema: {
+        days: z.number().optional().default(0).describe("Lookback window in days by session start time (default 0 = all time)."),
+        project: z.string().optional().describe("Project name/path substring to filter. Omit for all projects."),
+      },
+    },
+    async (input) => {
+      const facets = readUsageDataDir<FacetFile>("facets");
+      const metas = readUsageDataDir<MetaFile>("session-meta");
+      if (facets.length === 0 && metas.length === 0) {
+        return { content: [{ type: "text", text: "No session-quality data found in ~/.claude/usage-data/. Claude Code writes these facet files automatically over time." }] };
+      }
+
+      const metaById = new Map<string, MetaFile>();
+      for (const m of metas) if (m.session_id) metaById.set(m.session_id, m);
+
+      const cutoff = input.days && input.days > 0 ? cutoffDate(input.days) : null;
+      const projQ = input.project?.toLowerCase();
+
+      // Cost lookup from analyzer cache (best effort).
+      const result = await getResult();
+
+      const matches = (sid: string): boolean => {
+        const m = metaById.get(sid);
+        if (cutoff) {
+          const start = m?.start_time?.slice(0, 10);
+          if (!start || start < cutoff) return false;
+        }
+        if (projQ) {
+          const rec = result.sessions.get(sid);
+          const name = (rec?.projectName ?? m?.project_path ?? "").toLowerCase();
+          if (!name.includes(projQ)) return false;
+        }
+        return true;
+      };
+
+      const scoredFacets = facets.filter((f) => f.session_id && matches(f.session_id));
+      if (scoredFacets.length === 0) {
+        return { content: [{ type: "text", text: "No scored sessions match the given filters." }] };
+      }
+
+      const outcomeCounts: Record<string, number> = {};
+      const helpfulnessCounts: Record<string, number> = {};
+      const frictionCounts: Record<string, number> = {};
+      let frictionSessions = 0;
+      let achievedCostSum = 0, achievedCount = 0, notAchievedCostSum = 0, notAchievedCount = 0;
+      const frictionFeed: Array<{ name: string; outcome: string; types: string[]; detail: string }> = [];
+
+      for (const f of scoredFacets) {
+        if (f.outcome) outcomeCounts[f.outcome] = (outcomeCounts[f.outcome] ?? 0) + 1;
+        if (f.claude_helpfulness) helpfulnessCounts[f.claude_helpfulness] = (helpfulnessCounts[f.claude_helpfulness] ?? 0) + 1;
+        const types = Object.keys(f.friction_counts ?? {});
+        for (const [k, v] of Object.entries(f.friction_counts ?? {})) frictionCounts[k] = (frictionCounts[k] ?? 0) + v;
+        if (types.length > 0) frictionSessions++;
+
+        const cost = result.sessions.get(f.session_id)?.totalCost ?? 0;
+        if (f.outcome) {
+          if (ACHIEVED.has(f.outcome)) { achievedCostSum += cost; achievedCount++; }
+          else { notAchievedCostSum += cost; notAchievedCount++; }
+        }
+        if (f.friction_detail && f.friction_detail.trim()) {
+          const rec = result.sessions.get(f.session_id);
+          frictionFeed.push({
+            name: rec?.projectName ?? (f.session_id.slice(0, 8)),
+            outcome: f.outcome ?? "unknown",
+            types,
+            detail: f.friction_detail.trim(),
+          });
+        }
+      }
+
+      const scored = scoredFacets.length;
+      const achievedTotal = (outcomeCounts["fully_achieved"] ?? 0) + (outcomeCounts["mostly_achieved"] ?? 0);
+      const successRate = scored > 0 ? (achievedTotal / scored) * 100 : 0;
+      const frictionRate = scored > 0 ? (frictionSessions / scored) * 100 : 0;
+
+      // Feature adoption across the matching meta sessions.
+      const matchingMetaIds = [...metaById.keys()].filter(matches);
+      const adoptionDenom = matchingMetaIds.length;
+      let taskAgent = 0, mcp = 0, webSearch = 0, webFetch = 0;
+      for (const id of matchingMetaIds) {
+        const m = metaById.get(id)!;
+        if (m.uses_task_agent) taskAgent++;
+        if (m.uses_mcp) mcp++;
+        if (m.uses_web_search) webSearch++;
+        if (m.uses_web_fetch) webFetch++;
+      }
+      const adopt = (c: number) => adoptionDenom > 0 ? `${c} (${fmtPct((c / adoptionDenom) * 100)})` : "n/a";
+
+      const OUTCOME_RANK: Record<string, number> = {
+        not_achieved: 0, partially_achieved: 1, unclear_from_transcript: 2, mostly_achieved: 3, fully_achieved: 4,
+      };
+      frictionFeed.sort((a, b) => (b.types.length - a.types.length) || ((OUTCOME_RANK[a.outcome] ?? 5) - (OUTCOME_RANK[b.outcome] ?? 5)));
+
+      const scope = input.project ? `project: ${input.project}` : "all projects";
+      const window = cutoff ? `last ${input.days}d` : "all time";
+      const text = [
+        `Session Quality (${scope}, ${window})`,
+        ``,
+        `Scored sessions:  ${scored}`,
+        `Success rate:     ${fmtPct(successRate)}  (fully + mostly achieved)`,
+        `Friction rate:    ${fmtPct(frictionRate)}  (${frictionSessions} of ${scored} sessions)`,
+        ``,
+        `── Outcomes ──────────────────────────────────────────`,
+        ...distroLines(outcomeCounts),
+        ``,
+        `── Claude Helpfulness ────────────────────────────────`,
+        ...distroLines(helpfulnessCounts),
+        ``,
+        `── Friction Types ────────────────────────────────────`,
+        ...distroLines(frictionCounts),
+        ``,
+        `── Feature Adoption (of ${adoptionDenom} sessions) ───────────`,
+        `  Sub-agents (Task)   ${adopt(taskAgent)}`,
+        `  MCP tools           ${adopt(mcp)}`,
+        `  Web search          ${adopt(webSearch)}`,
+        `  Web fetch           ${adopt(webFetch)}`,
+        ``,
+        `── Cost by Outcome ───────────────────────────────────`,
+        `  Achieved:      ${formatCost(achievedCount > 0 ? achievedCostSum / achievedCount : 0)} avg  (${achievedCount} sessions)`,
+        `  Not achieved:  ${formatCost(notAchievedCount > 0 ? notAchievedCostSum / notAchievedCount : 0)} avg  (${notAchievedCount} sessions)`,
+        ``,
+        `── What Went Wrong (top ${Math.min(10, frictionFeed.length)}) ─────────────────────`,
+        ...(frictionFeed.length === 0
+          ? ["  (no friction notes)"]
+          : frictionFeed.slice(0, 10).flatMap((fr) => [
+              `  • [${fr.outcome.replace(/_/g, " ")}] ${fr.name}${fr.types.length ? ` (${fr.types.map((t) => t.replace(/_/g, " ")).join(", ")})` : ""}`,
+              `    ${fr.detail}`,
+            ])),
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
+  // ── get_compaction_stats ─────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_compaction_stats",
+    {
+      description:
+        "Context-compaction analysis: how often sessions hit auto-compaction, total tokens lost to " +
+        "compaction, trigger breakdown, and a cost comparison of compacted vs non-compacted sessions. " +
+        "Long sessions that compact tend to cost more — use this to spot them.",
+      inputSchema: {
+        project: z.string().optional().describe("Project name/path substring to filter. Omit for all projects."),
+      },
+    },
+    async (input) => {
+      const result = await getResult();
+      const projQ = input.project?.toLowerCase();
+
+      let totalCompactions = 0, totalSessionsWithCompaction = 0, totalSessions = 0, totalTokensLost = 0;
+      const triggerCounts: Record<string, number> = {};
+      let compactedCostSum = 0, compactedCount = 0, nonCompactedCostSum = 0, nonCompactedCount = 0;
+      const projRows: Array<{ name: string; compactions: number; sessions: number; tokensLost: number }> = [];
+
+      for (const project of result.projects.values()) {
+        if (projQ && !project.projectName.toLowerCase().includes(projQ)) continue;
+        let pCompactions = 0, pSessionsWith = 0, pTokensLost = 0;
+
+        for (const session of project.sessions) {
+          const events = session.meta.compactEvents;
+          totalSessions++;
+          if (events.length > 0) {
+            pSessionsWith++; totalSessionsWithCompaction++;
+            for (const ev of events) {
+              const lost = Math.max(0, ev.preTokens - ev.postTokens);
+              pTokensLost += lost; totalTokensLost += lost;
+              pCompactions++; totalCompactions++;
+              triggerCounts[ev.trigger] = (triggerCounts[ev.trigger] ?? 0) + 1;
+            }
+            compactedCostSum += session.totalCost; compactedCount++;
+          } else {
+            nonCompactedCostSum += session.totalCost; nonCompactedCount++;
+          }
+        }
+        if (pCompactions > 0) projRows.push({ name: project.projectName, compactions: pCompactions, sessions: pSessionsWith, tokensLost: pTokensLost });
+      }
+
+      if (totalSessions === 0) {
+        return { content: [{ type: "text", text: "No sessions match the given filters." }] };
+      }
+
+      projRows.sort((a, b) => b.compactions - a.compactions);
+      const scope = input.project ? `project: ${input.project}` : "all projects";
+      const text = [
+        `Compaction Stats (${scope})`,
+        ``,
+        `Total compactions:        ${totalCompactions}`,
+        `Sessions with compaction: ${totalSessionsWithCompaction} of ${totalSessions} (${fmtPct(totalSessions > 0 ? (totalSessionsWithCompaction / totalSessions) * 100 : 0)})`,
+        `Total tokens lost:        ${fmtTokens(totalTokensLost)}`,
+        `Avg lost per compaction:  ${fmtTokens(totalCompactions > 0 ? Math.round(totalTokensLost / totalCompactions) : 0)}`,
+        ``,
+        `── Triggers ──────────────────────────────────────────`,
+        ...distroLines(triggerCounts),
+        ``,
+        `── Cost: Compacted vs Not ────────────────────────────`,
+        `  Compacted:      ${formatCost(compactedCount > 0 ? compactedCostSum / compactedCount : 0)} avg  (${compactedCount} sessions)`,
+        `  Not compacted:  ${formatCost(nonCompactedCount > 0 ? nonCompactedCostSum / nonCompactedCount : 0)} avg  (${nonCompactedCount} sessions)`,
+        ``,
+        `── Top Projects by Compactions ───────────────────────`,
+        ...(projRows.length === 0 ? ["  (none)"] : projRows.slice(0, 12).map((p) =>
+          `  ${p.name.padEnd(28)} ${String(p.compactions).padStart(4)} compactions  ${p.sessions} sessions  ${fmtTokens(p.tokensLost)} lost`)),
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
+  // ── get_context_limit_stats ──────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_context_limit_stats",
+    {
+      description:
+        "Context-limit (window-full) analysis: how often sessions hit the context limit, how often that " +
+        "co-occurs with compaction, the CLAUDE.md token cost paid every session, and the sessions that " +
+        "hit the limit most. Large CLAUDE.md files shrink usable context — use this to find them.",
+      inputSchema: {
+        project: z.string().optional().describe("Project name/path substring to filter. Omit for all projects."),
+      },
+    },
+    async (input) => {
+      const result = await getResult();
+      const projQ = input.project?.toLowerCase();
+
+      let totalLimitHits = 0, totalSessions = 0, sessionsWithLimitHit = 0, sessionsWithBoth = 0;
+      const projRows: Array<{ name: string; hits: number; sessionsWith: number; claudeMdTokens: number; mdCostPerSession: number }> = [];
+      const topSessions: Array<{ title: string; name: string; hits: number; compactions: number; cost: number }> = [];
+
+      for (const project of result.projects.values()) {
+        if (projQ && !project.projectName.toLowerCase().includes(projQ)) continue;
+        let pHits = 0, pSessionsWith = 0;
+
+        for (const session of project.sessions) {
+          const lhc = session.meta.limitHitCount ?? 0;
+          const cc = session.meta.compactEvents.length;
+          totalSessions++;
+          pHits += lhc;
+          if (lhc > 0) {
+            pSessionsWith++; sessionsWithLimitHit++; totalLimitHits += lhc;
+            if (cc > 0) sessionsWithBoth++;
+            topSessions.push({
+              title: session.meta.aiTitle ?? session.sessionId.slice(0, 8),
+              name: project.projectName, hits: lhc, compactions: cc, cost: session.totalCost,
+            });
+          }
+        }
+        projRows.push({
+          name: project.projectName, hits: pHits, sessionsWith: pSessionsWith,
+          claudeMdTokens: project.claudeMd.totalEstimatedTokens,
+          mdCostPerSession: project.claudeMd.totalPerSessionCostUsd,
+        });
+      }
+
+      if (totalSessions === 0) {
+        return { content: [{ type: "text", text: "No sessions match the given filters." }] };
+      }
+
+      projRows.sort((a, b) => b.hits - a.hits || b.claudeMdTokens - a.claudeMdTokens);
+      topSessions.sort((a, b) => b.hits - a.hits || b.cost - a.cost);
+      const scope = input.project ? `project: ${input.project}` : "all projects";
+      const text = [
+        `Context-Limit Stats (${scope})`,
+        ``,
+        `Total limit hits:            ${totalLimitHits}`,
+        `Sessions hitting limit:      ${sessionsWithLimitHit} of ${totalSessions} (${fmtPct(totalSessions > 0 ? (sessionsWithLimitHit / totalSessions) * 100 : 0)})`,
+        `  ...also compacted:         ${sessionsWithBoth}`,
+        ``,
+        `── Projects (by limit hits; CLAUDE.md cost is paid every session) ──`,
+        ...projRows.slice(0, 12).map((p) =>
+          `  ${p.name.padEnd(28)} ${String(p.hits).padStart(4)} hits  ${p.sessionsWith} sessions  CLAUDE.md ${fmtTokens(p.claudeMdTokens)} tok / ${formatCost(p.mdCostPerSession)}/session`),
+        ``,
+        `── Top Sessions by Limit Hits ────────────────────────`,
+        ...(topSessions.length === 0 ? ["  (none)"] : topSessions.slice(0, 20).map((s) =>
+          `  ${String(s.hits).padStart(3)} hits  ${s.compactions} compactions  ${formatCost(s.cost).padStart(8)}  ${s.name} — ${s.title}`)),
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
+  // ── get_active_sessions ──────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_active_sessions",
+    {
+      description:
+        "List Claude Code sessions that are currently active (a session file modified within the threshold). " +
+        "Shows project, AI title, turn count, cost so far, git branch, and how long ago it was last active. " +
+        "Use to see what's running right now.",
+      inputSchema: {
+        threshold_minutes: z.number().optional().default(10).describe("How recently a session must have been modified to count as active (default 10 minutes)."),
+      },
+    },
+    async (input) => {
+      const thresholdMs = Math.max(1, input.threshold_minutes ?? 10) * 60 * 1000;
+      const sessions = await getActiveSessions(thresholdMs);
+      if (sessions.length === 0) {
+        return { content: [{ type: "text", text: `No active sessions in the last ${input.threshold_minutes ?? 10} minutes.` }] };
+      }
+
+      const now = Date.now();
+      const fmtAgo = (ms: number): string => {
+        const s = Math.floor((now - ms) / 1000);
+        if (s < 60) return `${s}s ago`;
+        if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+        return `${Math.floor(s / 3600)}h ago`;
+      };
+
+      const lines = sessions.map((s) => {
+        const turns = s.turns.filter((t) => !t.isSubagent).length;
+        const title = s.meta.aiTitle ?? s.sessionId.slice(0, 8);
+        const branch = s.meta.gitBranch ? ` [${s.meta.gitBranch}]` : "";
+        return `  ${fmtAgo(s.lastModifiedMs).padEnd(8)} ${s.projectName}${branch} — ${title}\n    ${turns} turns · ${formatCost(s.totalCost)} · ${fmtTokens(s.totals.input_tokens + s.totals.output_tokens)} tokens`;
+      });
+
+      const text = [
+        `Active Sessions (last ${input.threshold_minutes ?? 10} min): ${sessions.length}`,
+        ``,
+        ...lines,
       ].join("\n");
 
       return { content: [{ type: "text", text }] };
