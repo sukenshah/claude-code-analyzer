@@ -36,6 +36,10 @@ interface MetaFile {
   tool_errors?: number;
   user_interruptions?: number;
   first_prompt?: string;
+  uses_task_agent?: boolean;
+  uses_mcp?: boolean;
+  uses_web_search?: boolean;
+  uses_web_fetch?: boolean;
 }
 
 // ── Public response shapes ───────────────────────────────────────────────────
@@ -58,6 +62,20 @@ export interface QualitySessionRow {
   interruptions: number;
   friction: string[];
   cost: number | null;
+}
+
+export interface FeatureAdoptionRow {
+  name: string;
+  count: number;
+  pct: number;
+}
+
+export interface FrictionFeedRow {
+  sessionId: string;
+  projectName: string;
+  outcome: string | null;
+  frictionTypes: string[];
+  detail: string;
 }
 
 export interface QualityProjectRow {
@@ -104,6 +122,8 @@ export interface QualityReport {
     achievedCount: number;
     notAchievedCount: number;
   };
+  featureAdoption: FeatureAdoptionRow[];
+  frictionFeed: FrictionFeedRow[];
   recentSessions: QualitySessionRow[];
   projectBreakdown: QualityProjectRow[];
 }
@@ -167,6 +187,7 @@ export async function buildQualityReport(): Promise<QualityReport> {
     primarySuccessCounts: {}, satisfactionCounts: {}, frictionCounts: {},
     topGoalCategories: [], topTools: [], languageMix: [],
     costByOutcome: { achievedAvgCost: 0, notAchievedAvgCost: 0, achievedCount: 0, notAchievedCount: 0 },
+    featureAdoption: [], frictionFeed: [],
     recentSessions: [], projectBreakdown: [],
   };
   if (facets.length === 0 && metas.length === 0) return empty;
@@ -221,8 +242,11 @@ export async function buildQualityReport(): Promise<QualityReport> {
   let frictionSessions = 0;
   let achievedCostSum = 0, achievedCount = 0;
   let notAchievedCostSum = 0, notAchievedCount = 0;
+  // Feature adoption: count of sessions (with meta) using each capability.
+  let usesTaskAgent = 0, usesMcp = 0, usesWebSearch = 0, usesWebFetch = 0;
 
   const rows: QualitySessionRow[] = [];
+  const frictionFeed: FrictionFeedRow[] = [];
   // Per-project accumulation.
   const projAcc = new Map<string, {
     projectName: string; projectKey: string | null;
@@ -237,6 +261,13 @@ export async function buildQualityReport(): Promise<QualityReport> {
 
     sumInto(toolCounts, m?.tool_counts);
     sumInto(languages, m?.languages);
+
+    if (m) {
+      if (m.uses_task_agent) usesTaskAgent++;
+      if (m.uses_mcp) usesMcp++;
+      if (m.uses_web_search) usesWebSearch++;
+      if (m.uses_web_fetch) usesWebFetch++;
+    }
 
     const duration = m?.duration_minutes ?? 0;
     const commits = m?.git_commits ?? 0;
@@ -284,6 +315,16 @@ export async function buildQualityReport(): Promise<QualityReport> {
       cost: joined?.cost ?? null,
     });
 
+    if (f?.friction_detail && f.friction_detail.trim().length > 0) {
+      frictionFeed.push({
+        sessionId: id,
+        projectName,
+        outcome: f.outcome ?? null,
+        frictionTypes: friction,
+        detail: f.friction_detail.trim(),
+      });
+    }
+
     const pKey = projectKey ?? projectName;
     const acc = projAcc.get(pKey) ?? {
       projectName, projectKey, sessions: 0, scored: 0, achieved: 0,
@@ -302,6 +343,26 @@ export async function buildQualityReport(): Promise<QualityReport> {
   const achievedTotal = (outcomeCounts["fully_achieved"] ?? 0) + (outcomeCounts["mostly_achieved"] ?? 0);
 
   rows.sort((a, b) => (b.startTime ?? "").localeCompare(a.startTime ?? ""));
+
+  // Feature adoption — share of sessions that used each capability.
+  const adoptionDenom = metaById.size;
+  const featureAdoption: FeatureAdoptionRow[] = adoptionDenom === 0 ? [] : [
+    { name: "Sub-agents (Task)", count: usesTaskAgent },
+    { name: "MCP tools", count: usesMcp },
+    { name: "Web search", count: usesWebSearch },
+    { name: "Web fetch", count: usesWebFetch },
+  ].map((r) => ({ ...r, pct: (r.count / adoptionDenom) * 100 }));
+
+  // Friction feed — most friction-heavy sessions first, then non-achieved outcomes.
+  const OUTCOME_RANK: Record<string, number> = {
+    not_achieved: 0, partially_achieved: 1, unclear_from_transcript: 2,
+    mostly_achieved: 3, fully_achieved: 4,
+  };
+  frictionFeed.sort((a, b) => {
+    const byCount = b.frictionTypes.length - a.frictionTypes.length;
+    if (byCount !== 0) return byCount;
+    return (OUTCOME_RANK[a.outcome ?? ""] ?? 5) - (OUTCOME_RANK[b.outcome ?? ""] ?? 5);
+  });
 
   const projectBreakdown: QualityProjectRow[] = [...projAcc.values()]
     .map((a) => ({
@@ -340,6 +401,8 @@ export async function buildQualityReport(): Promise<QualityReport> {
       achievedCount,
       notAchievedCount,
     },
+    featureAdoption,
+    frictionFeed: frictionFeed.slice(0, 20),
     recentSessions: rows.slice(0, 30),
     projectBreakdown,
   };

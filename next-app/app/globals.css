@@ -1759,6 +1759,76 @@ code {
 .q-neg   { color: var(--red); font-weight: 500; }
 .q-muted { color: var(--text2); }
 
+/* metrics methodology section */
+.method-h {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 1.1rem 0 0.35rem;
+}
+.method-p {
+  font-size: 0.86rem;
+  line-height: 1.55;
+  color: var(--text2);
+  margin: 0 0 0.5rem;
+}
+.method-formula {
+  font-size: 0.8rem;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  margin: 0 0 0.6rem;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+.method-note {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text2);
+  font-style: italic;
+  border-top: 1px solid var(--border);
+  padding-top: 0.7rem;
+  margin: 1rem 0 0;
+}
+
+/* friction detail feed */
+.friction-feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.friction-feed-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem;
+  background: var(--bg2);
+}
+.friction-feed-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.friction-tag {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--orange);
+  background: var(--bg3);
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+}
+.friction-feed-detail {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.45;
+  color: var(--text2);
+}
+
 /* allow long stat labels to wrap to two lines instead of truncating */
 .stat-label-wrap {
   white-space: normal;

@@ -38,6 +38,20 @@ interface ProjectRow {
   totalCost: number;
 }
 
+interface FeatureAdoptionRow {
+  name: string;
+  count: number;
+  pct: number;
+}
+
+interface FrictionFeedRow {
+  sessionId: string;
+  projectName: string;
+  outcome: string | null;
+  frictionTypes: string[];
+  detail: string;
+}
+
 interface QualityData {
   hasData: boolean;
   global: {
@@ -70,6 +84,8 @@ interface QualityData {
     achievedCount: number;
     notAchievedCount: number;
   };
+  featureAdoption: FeatureAdoptionRow[];
+  frictionFeed: FrictionFeedRow[];
   recentSessions: SessionRow[];
   projectBreakdown: ProjectRow[];
 }
@@ -146,6 +162,27 @@ function Distribution({
           ))}
         </tbody>
       </table>
+    </section>
+  );
+}
+
+function CollapsibleCard({
+  title,
+  children,
+  defaultOpen = false,
+}: {
+  title: React.ReactNode;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="card">
+      <div className="collapsible-header" onClick={() => setOpen((o) => !o)}>
+        <h2>{title}</h2>
+        <span className="collapse-chevron">{open ? "−" : "+"}</span>
+      </div>
+      {open && <div className="collapsible-body">{children}</div>}
     </section>
   );
 }
@@ -234,6 +271,101 @@ export function QualityReport() {
             </div>
           </div>
 
+          {/* How metrics are calculated */}
+          <CollapsibleCard title="How these metrics are calculated">
+            <p className="section-desc">
+              These numbers are not heuristics computed from logs. After each session, Claude Code reads
+              the full transcript and writes a <strong>facet file</strong> to{" "}
+              <code>~/.claude/usage-data/facets/</code> grading the session, plus a{" "}
+              <strong>metadata file</strong> to <code>~/.claude/usage-data/session-meta/</code> with raw
+              activity counts. This page joins the two. So the qualitative scores reflect Claude&apos;s own
+              judgement of the conversation, while the activity figures are mechanical counts.
+            </p>
+
+            <h3 className="method-h">Success rate</h3>
+            <p className="method-p">
+              Claude grades every scored session&apos;s <code>outcome</code> as one of:{" "}
+              <span className="q-pos">fully achieved</span>, <span className="q-pos">mostly achieved</span>,{" "}
+              <span className="q-warn">partially achieved</span>,{" "}
+              <span className="q-muted">unclear from transcript</span>, or{" "}
+              <span className="q-neg">not achieved</span>. Success rate counts the top two buckets:
+            </p>
+            <pre className="method-formula">successRate = (fully_achieved + mostly_achieved) / scoredSessions × 100</pre>
+            <p className="method-p">
+              The denominator is only sessions that actually received a facet score
+              ({g.scoredSessions} here), <em>not</em> every session — a session with no transcript to
+              judge is excluded rather than counted as a failure. The full split is in the{" "}
+              <em>Outcomes</em> breakdown below.
+            </p>
+
+            <h3 className="method-h">Sessions with friction</h3>
+            <p className="method-p">
+              While scoring, Claude flags <strong>friction events</strong> — moments where the work
+              didn&apos;t go smoothly — into a <code>friction_counts</code> map keyed by type (e.g.{" "}
+              wrong approach, user rejected an action, buggy code, misunderstood request, session
+              interruption). A session counts toward this metric if it has <em>any</em> friction event,
+              regardless of how many:
+            </p>
+            <pre className="method-formula">frictionRate = sessionsWithAnyFriction / scoredSessions × 100</pre>
+            <p className="method-p">
+              High friction isn&apos;t inherently bad — iterative course-correction is normal work. The
+              actual notes Claude wrote per session are in <em>What Went Wrong</em>, and the type split is
+              in <em>Friction Types</em>.
+            </p>
+
+            <h3 className="method-h">Activity metrics (mechanical)</h3>
+            <p className="method-p">
+              Avg session length, git commits/pushes, lines added/removed, files modified, user
+              interruptions, and tool errors are <strong>summed directly from session metadata</strong> —
+              no judgement involved. Interruptions count Esc presses; tool errors count failed tool calls
+              (e.g. a non-zero Bash exit or an edit that didn&apos;t apply). Feature adoption counts how
+              many sessions used sub-agents, MCP tools, web search, or web fetch.
+            </p>
+
+            <h3 className="method-h">Cost by outcome</h3>
+            <p className="method-p">
+              Per-session cost comes from the analyzer cache (parsed token usage × model pricing), joined
+              to the facet outcome. We then average cost separately for achieved vs not-achieved sessions —
+              a rough read on whether spend is buying results.
+            </p>
+
+            <p className="method-note">
+              Because grading is Claude&apos;s own assessment of a conversation, treat these as a
+              directional signal, not an exact measurement. Scores can vary with how a session was
+              summarized.
+            </p>
+          </CollapsibleCard>
+
+          {/* Feature adoption */}
+          {data.featureAdoption.length > 0 && (
+            <section className="card">
+              <h2>Feature Adoption</h2>
+              <p className="section-desc">
+                Share of sessions (of {g.metaSessions} with activity metadata) that used each Claude Code
+                capability — how much of the toolset your workflow actually reaches for.
+              </p>
+              <table className="table">
+                <tbody>
+                  {data.featureAdoption.map((feat) => (
+                    <tr key={feat.name}>
+                      <td style={{ width: "40%" }}>{feat.name}</td>
+                      <td>
+                        <div className="model-cost-cell">
+                          <span>
+                            {feat.count} · {fmtPct(feat.pct)}
+                          </span>
+                          <div className="model-share-bar-track">
+                            <div className="model-share-bar-fill" style={{ width: `${feat.pct}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
           {/* Cost by outcome */}
           {(data.costByOutcome.achievedCount > 0 || data.costByOutcome.notAchievedCount > 0) && (
             <section className="card">
@@ -271,6 +403,35 @@ export function QualityReport() {
           <Distribution title="Session Type" counts={data.sessionTypeCounts} />
           <Distribution title="Primary Success Mode" counts={data.primarySuccessCounts} />
           <Distribution title="Friction Types" counts={data.frictionCounts} />
+
+          {/* Friction detail feed */}
+          {data.frictionFeed.length > 0 && (
+            <section className="card">
+              <h2>What Went Wrong</h2>
+              <p className="section-desc">
+                Claude&apos;s own notes on where each session hit friction — the &quot;why&quot; behind the
+                counts above. Most friction-heavy sessions first.
+              </p>
+              <ul className="friction-feed">
+                {data.frictionFeed.map((fr) => (
+                  <li key={fr.sessionId} className="friction-feed-item">
+                    <div className="friction-feed-head">
+                      <Link href={`/session/${fr.sessionId}`} className="project-link">
+                        {fr.projectName}
+                      </Link>
+                      {fr.outcome && (
+                        <span className={OUTCOME_CLASS[fr.outcome]}>{prettify(fr.outcome)}</span>
+                      )}
+                      {fr.frictionTypes.map((t) => (
+                        <span key={t} className="friction-tag">{prettify(t)}</span>
+                      ))}
+                    </div>
+                    <p className="friction-feed-detail">{fr.detail}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {/* Goal categories */}
           {data.topGoalCategories.length > 0 && (
