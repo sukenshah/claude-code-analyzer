@@ -71,3 +71,26 @@ To use from another project, add to their `.mcp.json`:
 ## Data sources
 
 JSONL files read from `~/.claude/projects/`. Cache stored at `~/.claude-analyzer/cache.db`. Only changed files (by mtime + size) are re-parsed on subsequent runs.
+
+## Glossary
+
+- **Cache efficiency**: ratio of cache-read tokens to total input tokens for a session; higher means cheaper per-token cost, driven by prompt caching and CLAUDE.md size.
+- **CLAUDE.md overhead**: estimated token cost that project CLAUDE.md files add to every session's context, computed from char count via `CHARS_PER_TOKEN` (3.5).
+- **Compaction**: automatic context-window compression triggered when context fills; each `CompactEvent` records trigger, tokens before/after, and duration. Treated as context-management friction.
+- **Context-limit hit**: a session event where the context window maxed out ("you've hit your limit"); counted per session as a difficulty/overhead signal.
+- **Entrypoint**: how a session was started (e.g. CLI command, a specific skill), extracted into session metadata for classification.
+- **Facet**: session-quality data Claude Code writes to `~/.claude/usage-data/facets/` — outcome, helpfulness, session type, friction types, primary success, summary. Source for all quality metrics.
+- **Feature adoption**: share of sessions that used a given Claude Code capability (subagents, MCP tools, web search/fetch); an ecosystem-maturity metric.
+- **Friction**: a quality dimension capturing impediments hit during a session (tooling, UX, refusals), tracked as friction counts + detail from facets.
+- **Helpfulness**: a subjective Claude-helpfulness rating pulled from facets (`claude_helpfulness`), complementing Outcome as a perceived-value signal.
+- **Interruption**: a user interrupting Claude mid-session, counted from session-meta as an interaction-friction signal.
+- **Model breakdown**: cost/token share per model plus a cross-model cost simulator ("what if this ran on Sonnet instead").
+- **Outcome**: a session's goal achievement, one of `fully_achieved` / `mostly_achieved` / `partially_achieved` / `not_achieved` / `unclear_from_transcript`; `fully`+`mostly` count as ACHIEVED for success rate.
+- **Permission mode**: the permission-handling mode active during a session (e.g. allow/prompt/deny), captured in session metadata.
+- **Project**: a top-level grouping = one Claude Code workspace/directory; aggregates its sessions and tracks cost, CLAUDE.md files, and context-limit hits. Project key derived from the `~/.claude/projects/` directory name.
+- **Session**: one conversation context within a project; aggregates turns and session-level metrics (compaction events, limit hits, subagent presence).
+- **Session quality**: the composite of success rate, friction, interruptions, outcome/helpfulness distributions, and feature adoption derived from facet + session-meta files.
+- **SessionMeta**: metadata parsed from a session log's headers — AI title, entrypoint, git branch, permission mode, version, MCP tools, tool-call counts, compaction events, limit-hit count.
+- **Spend trend**: daily burn rate with week-over-week change and projected monthly spend.
+- **Subagent**: a task-agent spawned within a session (`isSubagent` / `agentId` on turns); its turns roll up to the parent session.
+- **Turn**: a single user↔assistant exchange within a session; the atomic record carrying model, token usage, cost, and subagent attribution.
