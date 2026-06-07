@@ -90,6 +90,22 @@ export interface QualityProjectRow {
   totalCost: number;
 }
 
+export interface RoiStats {
+  totalCost: number;
+  costPerCommit: number;
+  costPerFileModified: number;
+  costPer100Lines: number;
+  linesPerDollar: number;
+  costPerMinute: number;
+  costPerSession: number;
+}
+
+export interface ToolReliability {
+  totalToolCalls: number;
+  totalToolErrors: number;
+  errorRatePct: number;
+}
+
 export interface QualityReport {
   hasData: boolean;
   global: {
@@ -107,6 +123,10 @@ export interface QualityReport {
     totalInterruptions: number;
     totalToolErrors: number;
   };
+  roi: RoiStats;
+  toolReliability: ToolReliability;
+  costByGoalCategory: Array<{ name: string; cost: number }>;
+  costByLanguage: Array<{ name: string; cost: number }>;
   outcomeCounts: Record<string, number>;
   helpfulnessCounts: Record<string, number>;
   sessionTypeCounts: Record<string, number>;
@@ -183,6 +203,9 @@ export async function buildQualityReport(): Promise<QualityReport> {
       totalLinesAdded: 0, totalLinesRemoved: 0, totalFilesModified: 0,
       totalInterruptions: 0, totalToolErrors: 0,
     },
+    roi: { totalCost: 0, costPerCommit: 0, costPerFileModified: 0, costPer100Lines: 0, linesPerDollar: 0, costPerMinute: 0, costPerSession: 0 },
+    toolReliability: { totalToolCalls: 0, totalToolErrors: 0, errorRatePct: 0 },
+    costByGoalCategory: [], costByLanguage: [],
     outcomeCounts: {}, helpfulnessCounts: {}, sessionTypeCounts: {},
     primarySuccessCounts: {}, satisfactionCounts: {}, frictionCounts: {},
     topGoalCategories: [], topTools: [], languageMix: [],
@@ -222,6 +245,9 @@ export async function buildQualityReport(): Promise<QualityReport> {
   const goalCategories: Record<string, number> = {};
   const toolCounts: Record<string, number> = {};
   const languages: Record<string, number> = {};
+  // Cost attributed to goal categories / languages, split proportionally per session.
+  const goalCost: Record<string, number> = {};
+  const languageCost: Record<string, number> = {};
 
   for (const f of facets) {
     bump(outcomeCounts, f.outcome);
@@ -239,6 +265,8 @@ export async function buildQualityReport(): Promise<QualityReport> {
   let totalDuration = 0, totalCommits = 0, totalPushes = 0;
   let totalLinesAdded = 0, totalLinesRemoved = 0, totalFilesModified = 0;
   let totalInterruptions = 0, totalToolErrors = 0;
+  let totalToolCalls = 0;
+  let totalCostJoined = 0;
   let frictionSessions = 0;
   let achievedCostSum = 0, achievedCount = 0;
   let notAchievedCostSum = 0, notAchievedCount = 0;
@@ -261,6 +289,24 @@ export async function buildQualityReport(): Promise<QualityReport> {
 
     sumInto(toolCounts, m?.tool_counts);
     sumInto(languages, m?.languages);
+
+    const sessionCost = joined?.cost ?? 0;
+    totalCostJoined += sessionCost;
+    for (const v of Object.values(m?.tool_counts ?? {})) totalToolCalls += v;
+
+    // Split this session's cost across its goal categories / languages, weighted by count.
+    const goalTotal = Object.values(f?.goal_categories ?? {}).reduce((s, v) => s + v, 0);
+    if (goalTotal > 0 && sessionCost > 0) {
+      for (const [k, v] of Object.entries(f!.goal_categories!)) {
+        goalCost[k] = (goalCost[k] ?? 0) + sessionCost * (v / goalTotal);
+      }
+    }
+    const langTotal = Object.values(m?.languages ?? {}).reduce((s, v) => s + v, 0);
+    if (langTotal > 0 && sessionCost > 0) {
+      for (const [k, v] of Object.entries(m!.languages!)) {
+        languageCost[k] = (languageCost[k] ?? 0) + sessionCost * (v / langTotal);
+      }
+    }
 
     if (m) {
       if (m.uses_task_agent) usesTaskAgent++;
@@ -378,6 +424,30 @@ export async function buildQualityReport(): Promise<QualityReport> {
     }))
     .sort((a, b) => b.totalCost - a.totalCost || b.sessions - a.sessions);
 
+  const totalLinesChanged = totalLinesAdded + totalLinesRemoved;
+  const roi: RoiStats = {
+    totalCost: totalCostJoined,
+    costPerCommit: totalCommits > 0 ? totalCostJoined / totalCommits : 0,
+    costPerFileModified: totalFilesModified > 0 ? totalCostJoined / totalFilesModified : 0,
+    costPer100Lines: totalLinesChanged > 0 ? (totalCostJoined / totalLinesChanged) * 100 : 0,
+    linesPerDollar: totalCostJoined > 0 ? totalLinesChanged / totalCostJoined : 0,
+    costPerMinute: totalDuration > 0 ? totalCostJoined / totalDuration : 0,
+    costPerSession: allIds.size > 0 ? totalCostJoined / allIds.size : 0,
+  };
+  const toolReliability: ToolReliability = {
+    totalToolCalls,
+    totalToolErrors,
+    errorRatePct: totalToolCalls > 0 ? (totalToolErrors / totalToolCalls) * 100 : 0,
+  };
+  const costByGoalCategory = Object.entries(goalCost)
+    .map(([name, cost]) => ({ name, cost }))
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 12);
+  const costByLanguage = Object.entries(languageCost)
+    .map(([name, cost]) => ({ name, cost }))
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 10);
+
   return {
     hasData: true,
     global: {
@@ -390,6 +460,10 @@ export async function buildQualityReport(): Promise<QualityReport> {
       totalCommits, totalPushes, totalLinesAdded, totalLinesRemoved,
       totalFilesModified, totalInterruptions, totalToolErrors,
     },
+    roi,
+    toolReliability,
+    costByGoalCategory,
+    costByLanguage,
     outcomeCounts, helpfulnessCounts, sessionTypeCounts,
     primarySuccessCounts, satisfactionCounts, frictionCounts,
     topGoalCategories: topN(goalCategories, 12),

@@ -41,6 +41,10 @@ function getDb(): Database.Database {
       output_tokens      INTEGER DEFAULT 0,
       cache_write_tokens INTEGER DEFAULT 0,
       cache_read_tokens  INTEGER DEFAULT 0,
+      cache_miss_tokens  INTEGER DEFAULT 0,
+      cache_miss_reason  TEXT,
+      ephemeral_5m       INTEGER DEFAULT 0,
+      ephemeral_1h       INTEGER DEFAULT 0,
       is_subagent        INTEGER DEFAULT 0,
       agent_id           TEXT,
       source_file        TEXT NOT NULL
@@ -52,8 +56,16 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_turns_file      ON turns(source_file);
   `);
 
-  // Migrate: add meta_json column to existing DBs that predate this change
-  try { db.exec("ALTER TABLE parsed_files ADD COLUMN meta_json TEXT"); } catch { /* already exists */ }
+  // Migrate: add columns to existing DBs that predate these changes
+  for (const ddl of [
+    "ALTER TABLE parsed_files ADD COLUMN meta_json TEXT",
+    "ALTER TABLE turns ADD COLUMN cache_miss_tokens INTEGER DEFAULT 0",
+    "ALTER TABLE turns ADD COLUMN cache_miss_reason TEXT",
+    "ALTER TABLE turns ADD COLUMN ephemeral_5m INTEGER DEFAULT 0",
+    "ALTER TABLE turns ADD COLUMN ephemeral_1h INTEGER DEFAULT 0",
+  ]) {
+    try { db.exec(ddl); } catch { /* already exists */ }
+  }
 
   return db;
 }
@@ -87,10 +99,12 @@ export function saveTurns(
     INSERT OR REPLACE INTO turns
       (uuid, session_id, project_key, parent_uuid, timestamp, model,
        input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
+       cache_miss_tokens, cache_miss_reason, ephemeral_5m, ephemeral_1h,
        is_subagent, agent_id, source_file)
     VALUES
       (@uuid, @session_id, @project_key, @parent_uuid, @timestamp, @model,
        @input_tokens, @output_tokens, @cache_write_tokens, @cache_read_tokens,
+       @cache_miss_tokens, @cache_miss_reason, @ephemeral_5m, @ephemeral_1h,
        @is_subagent, @agent_id, @source_file)
   `);
 
@@ -118,6 +132,10 @@ export function saveTurns(
         output_tokens: turn.usage.output_tokens,
         cache_write_tokens: turn.usage.cache_creation_input_tokens,
         cache_read_tokens: turn.usage.cache_read_input_tokens,
+        cache_miss_tokens: turn.cacheMissTokens,
+        cache_miss_reason: turn.cacheMissReason,
+        ephemeral_5m: turn.ephemeral5mTokens,
+        ephemeral_1h: turn.ephemeral1hTokens,
         is_subagent: turn.isSubagent ? 1 : 0,
         agent_id: turn.agentId,
         source_file: turn.sourceFile,
@@ -132,8 +150,10 @@ export function loadCachedTurns(filePath: string): TurnRecord[] {
     .all(filePath) as Array<{
       uuid: string; session_id: string; project_key: string; parent_uuid: string | null;
       timestamp: string; model: string; input_tokens: number; output_tokens: number;
-      cache_write_tokens: number; cache_read_tokens: number; is_subagent: number;
-      agent_id: string | null; source_file: string;
+      cache_write_tokens: number; cache_read_tokens: number;
+      cache_miss_tokens: number | null; cache_miss_reason: string | null;
+      ephemeral_5m: number | null; ephemeral_1h: number | null;
+      is_subagent: number; agent_id: string | null; source_file: string;
     }>;
 
   return rows.map((r) => {
@@ -155,6 +175,10 @@ export function loadCachedTurns(filePath: string): TurnRecord[] {
       isSubagent: r.is_subagent === 1,
       agentId: r.agent_id,
       sourceFile: r.source_file,
+      cacheMissTokens: r.cache_miss_tokens ?? 0,
+      cacheMissReason: r.cache_miss_reason ?? null,
+      ephemeral5mTokens: r.ephemeral_5m ?? 0,
+      ephemeral1hTokens: r.ephemeral_1h ?? 0,
     };
   });
 }
@@ -168,6 +192,10 @@ export function loadCachedMeta(filePath: string): SessionMeta {
     const parsed = JSON.parse(row.meta_json) as SessionMeta;
     parsed.limitHitCount = parsed.limitHitCount ?? 0;
     parsed.mcpToolCalls = parsed.mcpToolCalls ?? {};
+    parsed.hookInvocations = parsed.hookInvocations ?? 0;
+    parsed.hookErrors = parsed.hookErrors ?? 0;
+    parsed.hookDurationMs = parsed.hookDurationMs ?? 0;
+    parsed.queuedMessages = parsed.queuedMessages ?? 0;
     return parsed;
   } catch { return emptyMeta(); }
 }

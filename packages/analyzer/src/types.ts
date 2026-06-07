@@ -25,6 +25,13 @@ export interface TurnRecord {
   isSubagent: boolean;
   agentId: string | null;
   sourceFile: string;
+  // Cache-invalidation diagnostics (from message.diagnostics): tokens that missed
+  // the prompt cache and the reason the cache was busted (e.g. "tools_changed").
+  cacheMissTokens: number;
+  cacheMissReason: string | null;
+  // Ephemeral cache-creation split by TTL bucket (from usage.cache_creation).
+  ephemeral5mTokens: number;
+  ephemeral1hTokens: number;
 }
 
 export interface SessionRecord {
@@ -85,6 +92,13 @@ export interface SessionMeta {
   mcpToolCalls: Record<string, number>;
   compactEvents: CompactEvent[];
   limitHitCount: number;
+  // Hook telemetry from attachment records (hook_success / hook_non_blocking_error /
+  // async_hook_response): how many hooks fired, how many failed, total wall-clock added.
+  hookInvocations: number;
+  hookErrors: number;
+  hookDurationMs: number;
+  // Count of queue-operation (enqueue) records — user queued messages while Claude was busy.
+  queuedMessages: number;
 }
 
 export interface ScanEntry {

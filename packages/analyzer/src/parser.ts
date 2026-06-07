@@ -8,6 +8,12 @@ interface RawUsage {
   output_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  cache_creation?: { ephemeral_5m_input_tokens?: number; ephemeral_1h_input_tokens?: number };
+}
+
+interface RawDiagnostics {
+  cache_miss_reason?: { type?: string };
+  cache_missed_input_tokens?: number;
 }
 
 interface RawLine {
@@ -22,14 +28,32 @@ interface RawLine {
   gitBranch?: string;
   permissionMode?: string;
   version?: string;
-  attachment?: { type?: string; addedNames?: string[] };
+  operation?: string;
+  attachment?: {
+    type?: string;
+    addedNames?: string[];
+    exitCode?: number;
+    durationMs?: number;
+  };
   compactMetadata?: { trigger?: string; preTokens?: number; postTokens?: number; durationMs?: number };
-  message?: { model?: string; usage?: RawUsage; content?: Array<{ type?: string; text?: string; name?: string }> };
+  message?: {
+    model?: string;
+    usage?: RawUsage;
+    content?: Array<{ type?: string; text?: string; name?: string }>;
+    diagnostics?: RawDiagnostics;
+  };
 }
 
 export function emptyMeta(): SessionMeta {
-  return { aiTitle: null, entrypoint: null, gitBranch: null, permissionMode: null, version: null, mcpTools: [], mcpToolCalls: {}, compactEvents: [], limitHitCount: 0 };
+  return {
+    aiTitle: null, entrypoint: null, gitBranch: null, permissionMode: null, version: null,
+    mcpTools: [], mcpToolCalls: {}, compactEvents: [], limitHitCount: 0,
+    hookInvocations: 0, hookErrors: 0, hookDurationMs: 0, queuedMessages: 0,
+  };
 }
+
+// Attachment types Claude Code emits for hook lifecycle events.
+const HOOK_ATTACHMENT_TYPES = new Set(["hook_success", "hook_non_blocking_error", "async_hook_response"]);
 
 export async function parseFile(entry: ScanEntry): Promise<{ turns: TurnRecord[]; meta: SessionMeta }> {
   const turns: TurnRecord[] = [];
@@ -71,6 +95,20 @@ export async function parseFile(entry: ScanEntry): Promise<{ turns: TurnRecord[]
       for (const tool of parsed.attachment.addedNames ?? []) {
         if (tool.startsWith("mcp__")) mcpToolSet.add(tool);
       }
+    }
+
+    // Hook telemetry — count invocations, failures, and total wall-clock added.
+    if (parsed.type === "attachment" && parsed.attachment && HOOK_ATTACHMENT_TYPES.has(parsed.attachment.type ?? "")) {
+      meta.hookInvocations++;
+      meta.hookDurationMs += parsed.attachment.durationMs ?? 0;
+      if (parsed.attachment.type === "hook_non_blocking_error" || (parsed.attachment.exitCode ?? 0) !== 0) {
+        meta.hookErrors++;
+      }
+    }
+
+    // Queue operations — user enqueued a message while Claude was working.
+    if (parsed.type === "queue-operation" && parsed.operation === "enqueue") {
+      meta.queuedMessages++;
     }
     if (parsed.type === "system" && parsed.subtype === "compact_boundary" && parsed.compactMetadata) {
       const ev: CompactEvent = {
@@ -116,6 +154,12 @@ export async function parseFile(entry: ScanEntry): Promise<{ turns: TurnRecord[]
       cache_read_input_tokens: usage.cache_read_input_tokens ?? 0,
     };
 
+    const diag = parsed.message?.diagnostics;
+    const cacheMissTokens = diag?.cache_missed_input_tokens ?? 0;
+    const cacheMissReason = diag?.cache_miss_reason?.type ?? null;
+    const ephemeral5mTokens = usage.cache_creation?.ephemeral_5m_input_tokens ?? 0;
+    const ephemeral1hTokens = usage.cache_creation?.ephemeral_1h_input_tokens ?? 0;
+
     // Synthetic fallback includes agentId to prevent cross-file UUID collisions when the
     // UUID field is absent: main file and subagent files share the same sessionId but
     // each resets turns.length to 0, so without the agentId they'd generate identical keys.
@@ -135,6 +179,10 @@ export async function parseFile(entry: ScanEntry): Promise<{ turns: TurnRecord[]
       isSubagent: entry.isSubagent,
       agentId: entry.agentId,
       sourceFile: entry.filePath,
+      cacheMissTokens,
+      cacheMissReason,
+      ephemeral5mTokens,
+      ephemeral1hTokens,
     });
   }
 

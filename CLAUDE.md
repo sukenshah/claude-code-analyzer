@@ -17,7 +17,7 @@ Local app to inspect Claude Code JSONL session logs for token usage and cost per
 
 ```
 packages/analyzer/   Core JSONL parser + SQLite cache (~/.claude-analyzer/cache.db)
-packages/mcp/        MCP server (11 tools, stdio transport)
+packages/mcp/        MCP server (13 tools, stdio transport)
 next-app/            Next.js app — API routes + React UI (localhost:3737)
 ```
 
@@ -62,6 +62,8 @@ To use from another project, add to their `.mcp.json`:
 - `get_compaction_stats` — compaction frequency, tokens lost, triggers, compacted-vs-not cost
 - `get_context_limit_stats` — context-limit hits, CLAUDE.md token cost per session, top offending sessions
 - `get_active_sessions` — currently-running sessions (modified within threshold)
+- `get_efficiency_insights` — cache-miss waste, subagent cost share, model switching, turn cadence, temporal usage, ephemeral TTL split, hook overhead, queued messages
+- `get_productivity_roi` — $/commit, $/file, $/100 lines, lines/$, $/active-minute, tool reliability, spend by goal category
 - `refresh_cache` — re-scan JSONL files
 
 ## Skill
@@ -75,10 +77,14 @@ JSONL files read from `~/.claude/projects/`. Cache stored at `~/.claude-analyzer
 ## Glossary
 
 - **Cache efficiency**: ratio of cache-read tokens to total input tokens for a session; higher means cheaper per-token cost, driven by prompt caching and CLAUDE.md size.
+- **Cache-miss waste**: dollars lost when tokens that should have hit the prompt cache were re-billed at the cache-write rate instead of the cache-read rate; sourced from per-turn `message.diagnostics` and grouped by invalidation reason (e.g. `tools_changed`).
 - **CLAUDE.md overhead**: estimated token cost that project CLAUDE.md files add to every session's context, computed from char count via `CHARS_PER_TOKEN` (3.5).
 - **Compaction**: automatic context-window compression triggered when context fills; each `CompactEvent` records trigger, tokens before/after, and duration. Treated as context-management friction.
 - **Context-limit hit**: a session event where the context window maxed out ("you've hit your limit"); counted per session as a difficulty/overhead signal.
+- **Efficiency insights**: the turn-derived analytics bundle (cache-miss waste, subagent cost share, model switching, turn cadence, temporal usage, ephemeral TTL split, hook overhead, queued messages) computed by `buildEfficiencyInsights` and surfaced on the `/efficiency` page.
+- **Ephemeral cache TTL**: the time-to-live bucket (5-minute vs 1-hour) a cache-creation token was written under; a heavier 1-hour share means longer-lived, cheaper cache for long sessions.
 - **Entrypoint**: how a session was started (e.g. CLI command, a specific skill), extracted into session metadata for classification.
+- **Hook overhead**: total count, failure count, and wall-clock time added by lifecycle hooks, aggregated from `hook_success` / `hook_non_blocking_error` / `async_hook_response` attachment records.
 - **Facet**: session-quality data Claude Code writes to `~/.claude/usage-data/facets/` — outcome, helpfulness, session type, friction types, primary success, summary. Source for all quality metrics.
 - **Feature adoption**: share of sessions that used a given Claude Code capability (subagents, MCP tools, web search/fetch); an ecosystem-maturity metric.
 - **Friction**: a quality dimension capturing impediments hit during a session (tooling, UX, refusals), tracked as friction counts + detail from facets.
@@ -87,10 +93,14 @@ JSONL files read from `~/.claude/projects/`. Cache stored at `~/.claude-analyzer
 - **Model breakdown**: cost/token share per model plus a cross-model cost simulator ("what if this ran on Sonnet instead").
 - **Outcome**: a session's goal achievement, one of `fully_achieved` / `mostly_achieved` / `partially_achieved` / `not_achieved` / `unclear_from_transcript`; `fully`+`mostly` count as ACHIEVED for success rate.
 - **Permission mode**: the permission-handling mode active during a session (e.g. allow/prompt/deny), captured in session metadata.
+- **Queued message**: a `queue-operation` enqueue record — the user queued a message while Claude was still working; counted as an impatience/parallel-intent signal.
 - **Project**: a top-level grouping = one Claude Code workspace/directory; aggregates its sessions and tracks cost, CLAUDE.md files, and context-limit hits. Project key derived from the `~/.claude/projects/` directory name.
 - **Session**: one conversation context within a project; aggregates turns and session-level metrics (compaction events, limit hits, subagent presence).
+- **ROI (return on investment)**: spend reframed as value delivered — cost per commit, per file modified, per 100 lines changed, lines per dollar, and cost per active minute; computed by joining session-meta activity counts with parsed cost.
 - **Session quality**: the composite of success rate, friction, interruptions, outcome/helpfulness distributions, and feature adoption derived from facet + session-meta files.
 - **SessionMeta**: metadata parsed from a session log's headers — AI title, entrypoint, git branch, permission mode, version, MCP tools, tool-call counts, compaction events, limit-hit count.
 - **Spend trend**: daily burn rate with week-over-week change and projected monthly spend.
 - **Subagent**: a task-agent spawned within a session (`isSubagent` / `agentId` on turns); its turns roll up to the parent session.
+- **Subagent cost share**: the fraction of a session's (or the global) spend and tokens attributable to subagent turns vs the main thread.
+- **Turn cadence**: the wall-clock gap between consecutive main turns within a session (median / p90), with gaps over 30 minutes excluded as session breaks rather than latency.
 - **Turn**: a single user↔assistant exchange within a session; the atomic record carrying model, token usage, cost, and subagent attribution.

@@ -59,6 +59,15 @@ export function calculateCost(usage: TokenUsage, model: string): CostBreakdown {
   };
 }
 
+// Estimate the dollars wasted by a cache miss: tokens that should have been billed at the
+// cheap cache-read rate were instead re-billed at the cache-write (creation) rate. The waste
+// is the rate delta on those tokens.
+export function estimateCacheMissCost(missTokens: number, model: string): number {
+  if (missTokens <= 0) return 0;
+  const p = getPricing(model);
+  return (missTokens / 1_000_000) * (p.cacheWrite - p.cacheRead);
+}
+
 export function sumUsage(usages: TokenUsage[]): TokenUsage {
   return usages.reduce(
     (acc, u) => ({

@@ -24,6 +24,10 @@ export function mergeMeta(a: SessionMeta, b: SessionMeta): SessionMeta {
     compactEvents: [...a.compactEvents, ...b.compactEvents]
       .sort((x, y) => x.timestamp.localeCompare(y.timestamp)),
     limitHitCount: (a.limitHitCount ?? 0) + (b.limitHitCount ?? 0),
+    hookInvocations: (a.hookInvocations ?? 0) + (b.hookInvocations ?? 0),
+    hookErrors: (a.hookErrors ?? 0) + (b.hookErrors ?? 0),
+    hookDurationMs: (a.hookDurationMs ?? 0) + (b.hookDurationMs ?? 0),
+    queuedMessages: (a.queuedMessages ?? 0) + (b.queuedMessages ?? 0),
   };
 }
 

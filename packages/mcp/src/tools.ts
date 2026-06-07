@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { analyze, formatCost, calculateCost, getActiveSessions } from "@claude-analyzer/analyzer";
+import { analyze, formatCost, calculateCost, getActiveSessions, buildEfficiencyInsights } from "@claude-analyzer/analyzer";
 import type { AnalysisResult } from "@claude-analyzer/analyzer";
 
 let cachedResult: AnalysisResult | null = null;
@@ -46,6 +46,8 @@ interface FacetFile {
   friction_detail?: string;
   primary_success?: string;
   brief_summary?: string;
+  user_satisfaction_counts?: Record<string, number>;
+  goal_categories?: Record<string, number>;
 }
 
 interface MetaFile {
@@ -57,6 +59,13 @@ interface MetaFile {
   uses_mcp?: boolean;
   uses_web_search?: boolean;
   uses_web_fetch?: boolean;
+  git_commits?: number;
+  git_pushes?: number;
+  files_modified?: number;
+  lines_added?: number;
+  lines_removed?: number;
+  tool_counts?: Record<string, number>;
+  tool_errors?: number;
 }
 
 function readUsageDataDir<T>(sub: string): T[] {
@@ -569,6 +578,7 @@ export function registerTools(server: McpServer): void {
       const outcomeCounts: Record<string, number> = {};
       const helpfulnessCounts: Record<string, number> = {};
       const frictionCounts: Record<string, number> = {};
+      const satisfactionCounts: Record<string, number> = {};
       let frictionSessions = 0;
       let achievedCostSum = 0, achievedCount = 0, notAchievedCostSum = 0, notAchievedCount = 0;
       const frictionFeed: Array<{ name: string; outcome: string; types: string[]; detail: string }> = [];
@@ -578,6 +588,7 @@ export function registerTools(server: McpServer): void {
         if (f.claude_helpfulness) helpfulnessCounts[f.claude_helpfulness] = (helpfulnessCounts[f.claude_helpfulness] ?? 0) + 1;
         const types = Object.keys(f.friction_counts ?? {});
         for (const [k, v] of Object.entries(f.friction_counts ?? {})) frictionCounts[k] = (frictionCounts[k] ?? 0) + v;
+        for (const [k, v] of Object.entries(f.user_satisfaction_counts ?? {})) satisfactionCounts[k] = (satisfactionCounts[k] ?? 0) + v;
         if (types.length > 0) frictionSessions++;
 
         const cost = result.sessions.get(f.session_id)?.totalCost ?? 0;
@@ -605,13 +616,17 @@ export function registerTools(server: McpServer): void {
       const matchingMetaIds = [...metaById.keys()].filter(matches);
       const adoptionDenom = matchingMetaIds.length;
       let taskAgent = 0, mcp = 0, webSearch = 0, webFetch = 0;
+      let toolCalls = 0, toolErrors = 0;
       for (const id of matchingMetaIds) {
         const m = metaById.get(id)!;
         if (m.uses_task_agent) taskAgent++;
         if (m.uses_mcp) mcp++;
         if (m.uses_web_search) webSearch++;
         if (m.uses_web_fetch) webFetch++;
+        for (const v of Object.values(m.tool_counts ?? {})) toolCalls += v;
+        toolErrors += m.tool_errors ?? 0;
       }
+      const toolErrorRate = toolCalls > 0 ? (toolErrors / toolCalls) * 100 : 0;
       const adopt = (c: number) => adoptionDenom > 0 ? `${c} (${fmtPct((c / adoptionDenom) * 100)})` : "n/a";
 
       const OUTCOME_RANK: Record<string, number> = {
@@ -636,6 +651,13 @@ export function registerTools(server: McpServer): void {
         ``,
         `── Friction Types ────────────────────────────────────`,
         ...distroLines(frictionCounts),
+        ``,
+        `── User Satisfaction ─────────────────────────────────`,
+        ...distroLines(satisfactionCounts),
+        ``,
+        `── Tool Reliability ──────────────────────────────────`,
+        `  Tool calls:     ${fmtTokens(toolCalls)}`,
+        `  Tool errors:    ${toolErrors}  (${fmtPct(toolErrorRate)} error rate)`,
         ``,
         `── Feature Adoption (of ${adoptionDenom} sessions) ───────────`,
         `  Sub-agents (Task)   ${adopt(taskAgent)}`,
@@ -871,6 +893,209 @@ export function registerTools(server: McpServer): void {
           text: `Cache refreshed. Scanned ${result.newFilesScanned} files. Found ${result.summary.sessionCount} sessions across ${result.summary.projectCount} projects.`,
         }],
       };
+    }
+  );
+
+  // ── get_efficiency_insights ──────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_efficiency_insights",
+    {
+      description:
+        "Token/time efficiency insights derived from session turns: cache-miss waste (tokens lost to " +
+        "prompt-cache invalidation + $ wasted, by reason), subagent cost share, model switching within " +
+        "sessions, turn cadence, hour-of-day/weekday usage, ephemeral cache TTL split, hook overhead, and " +
+        "queued-message count. Use to find where tokens and time leak.",
+      inputSchema: {
+        project: z.string().optional().describe("Project name/path substring to filter. Omit for all projects."),
+        days: z.number().optional().default(0).describe("Lookback window in days (default 0 = all time)."),
+      },
+    },
+    async (input) => {
+      const result = await getResult();
+      const cutoff = input.days && input.days > 0 ? cutoffDate(input.days) : null;
+      const projQ = input.project?.toLowerCase();
+
+      let turns = result.allTurns;
+      if (cutoff) turns = turns.filter((t) => t.timestamp.slice(0, 10) >= cutoff);
+      if (projQ) turns = turns.filter((t) => t.projectKey.toLowerCase().includes(projQ));
+
+      const sessionIds = new Set(turns.map((t) => t.sessionId));
+      const sessions = [...result.sessions.values()].filter((s) => sessionIds.has(s.sessionId));
+      if (turns.length === 0) {
+        return { content: [{ type: "text", text: "No data found for the given filters." }] };
+      }
+
+      const ins = buildEfficiencyInsights(turns, sessions);
+      const cm = ins.cacheMiss;
+      const sub = ins.subagentShare;
+      const hooks = ins.hooks;
+
+      const fmtSec = (s: number) => s >= 60 ? `${(s / 60).toFixed(1)}m` : `${s.toFixed(0)}s`;
+
+      // Hour histogram (compact 24-slot bar by turn count).
+      const maxHour = Math.max(1, ...ins.byHour.map((h) => h.turns));
+      const hourRows = ins.byHour
+        .filter((h) => h.turns > 0)
+        .map((h) => `  ${h.label}  ${String(h.turns).padStart(5)}  ${formatCost(h.cost).padStart(9)}  ${"█".repeat(Math.max(1, Math.round((h.turns / maxHour) * 20)))}`);
+
+      const weekdayRows = ins.byWeekday
+        .map((w) => `  ${w.label}  ${String(w.turns).padStart(5)} turns  ${formatCost(w.cost).padStart(9)}`);
+
+      const scope = input.project ? `project: ${input.project}` : "all projects";
+      const window = cutoff ? `last ${input.days}d` : "all time";
+      const text = [
+        `Efficiency Insights (${scope}, ${window})`,
+        ``,
+        `── Cache-Miss Waste ──────────────────────────────────`,
+        `  Tokens missed:    ${fmtTokens(cm.totalMissTokens)}  (${cm.turnsAffected} turns)`,
+        `  Est. $ wasted:    ${formatCost(cm.estWastedCost)}  (re-billed at cache-write vs cache-read)`,
+        ...(cm.byReason.length === 0
+          ? ["  (no cache-miss diagnostics recorded)"]
+          : cm.byReason.map((r) => `    ${r.reason.replace(/_/g, " ").padEnd(22)} ${fmtTokens(r.tokens).padStart(8)}  ${formatCost(r.estCost)}`)),
+        ``,
+        `── Subagent Cost Share ───────────────────────────────`,
+        `  Main thread:      ${formatCost(sub.mainCost)}  (${fmtTokens(sub.mainTokens)} tokens)`,
+        `  Subagents:        ${formatCost(sub.subagentCost)}  (${fmtTokens(sub.subagentTokens)} tokens)  ${fmtPct(sub.subagentCostPct)} of spend`,
+        ``,
+        `── Model Switching ───────────────────────────────────`,
+        `  Sessions w/ >1 model:  ${ins.modelSwitching.sessionsWithMultipleModels} of ${ins.modelSwitching.totalSessions}  (${fmtPct(ins.modelSwitching.multiModelPct)})`,
+        `  Total switch events:   ${ins.modelSwitching.switchEvents}`,
+        ``,
+        `── Turn Cadence (gap between consecutive turns) ───────`,
+        `  Median:  ${fmtSec(ins.cadence.medianGapSec)}   p90: ${fmtSec(ins.cadence.p90GapSec)}   (${ins.cadence.sampleCount} gaps, breaks >30m excluded)`,
+        ``,
+        `── Ephemeral Cache TTL ───────────────────────────────`,
+        `  5-min bucket:  ${fmtTokens(ins.ephemeral.total5mTokens)}  (${fmtPct(ins.ephemeral.pct5m)})`,
+        `  1-hour bucket: ${fmtTokens(ins.ephemeral.total1hTokens)}`,
+        ``,
+        `── Hook Overhead ─────────────────────────────────────`,
+        `  Invocations:  ${hooks.totalInvocations}   errors: ${hooks.totalErrors} (${fmtPct(hooks.errorRate)})   total time: ${(hooks.totalDurationMs / 1000).toFixed(1)}s   avg: ${hooks.avgDurationMs.toFixed(0)}ms`,
+        ``,
+        `── Queued Messages (impatience) ──────────────────────`,
+        `  Total queued: ${ins.queue.totalQueued}   across ${ins.queue.sessionsWithQueue} sessions`,
+        ``,
+        `── Usage by Weekday ──────────────────────────────────`,
+        ...weekdayRows,
+        ``,
+        `── Usage by Hour (UTC) ───────────────────────────────`,
+        ...(hourRows.length === 0 ? ["  (none)"] : hourRows),
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
+    }
+  );
+
+  // ── get_productivity_roi ──────────────────────────────────────────────────────
+
+  server.registerTool(
+    "get_productivity_roi",
+    {
+      description:
+        "Return-on-investment view: dollars spent per git commit, per file modified, per 100 lines " +
+        "changed, lines changed per dollar, and cost per active minute — plus tool-call reliability and " +
+        "which goal categories (debugging, feature design, etc.) burn the most spend. Joins facet/session-meta " +
+        "files with parsed cost. Reframes spend as value delivered.",
+      inputSchema: {
+        project: z.string().optional().describe("Project name/path substring to filter. Omit for all projects."),
+        days: z.number().optional().default(0).describe("Lookback window in days by session start time (default 0 = all time)."),
+      },
+    },
+    async (input) => {
+      const facets = readUsageDataDir<FacetFile>("facets");
+      const metas = readUsageDataDir<MetaFile>("session-meta");
+      if (metas.length === 0) {
+        return { content: [{ type: "text", text: "No session-meta data found in ~/.claude/usage-data/. Claude Code writes these files automatically over time." }] };
+      }
+
+      const facetById = new Map<string, FacetFile>();
+      for (const f of facets) if (f.session_id) facetById.set(f.session_id, f);
+      const metaById = new Map<string, MetaFile>();
+      for (const m of metas) if (m.session_id) metaById.set(m.session_id, m);
+
+      const cutoff = input.days && input.days > 0 ? cutoffDate(input.days) : null;
+      const projQ = input.project?.toLowerCase();
+      const result = await getResult();
+
+      const matches = (sid: string): boolean => {
+        const m = metaById.get(sid);
+        if (cutoff) {
+          const start = m?.start_time?.slice(0, 10);
+          if (!start || start < cutoff) return false;
+        }
+        if (projQ) {
+          const rec = result.sessions.get(sid);
+          const name = (rec?.projectName ?? m?.project_path ?? "").toLowerCase();
+          if (!name.includes(projQ)) return false;
+        }
+        return true;
+      };
+
+      let cost = 0, commits = 0, pushes = 0, files = 0, linesAdded = 0, linesRemoved = 0;
+      let duration = 0, sessions = 0, toolCalls = 0, toolErrors = 0;
+      const goalCost: Record<string, number> = {};
+
+      for (const id of metaById.keys()) {
+        if (!matches(id)) continue;
+        const m = metaById.get(id)!;
+        const f = facetById.get(id);
+        const c = result.sessions.get(id)?.totalCost ?? 0;
+        sessions++;
+        cost += c;
+        commits += m.git_commits ?? 0;
+        pushes += m.git_pushes ?? 0;
+        files += m.files_modified ?? 0;
+        linesAdded += m.lines_added ?? 0;
+        linesRemoved += m.lines_removed ?? 0;
+        duration += m.duration_minutes ?? 0;
+        for (const v of Object.values(m.tool_counts ?? {})) toolCalls += v;
+        toolErrors += m.tool_errors ?? 0;
+
+        const goalTotal = Object.values(f?.goal_categories ?? {}).reduce((s, v) => s + v, 0);
+        if (goalTotal > 0 && c > 0) {
+          for (const [k, v] of Object.entries(f!.goal_categories!)) {
+            goalCost[k] = (goalCost[k] ?? 0) + c * (v / goalTotal);
+          }
+        }
+      }
+
+      if (sessions === 0) {
+        return { content: [{ type: "text", text: "No sessions match the given filters." }] };
+      }
+
+      const linesChanged = linesAdded + linesRemoved;
+      const per = (denom: number) => denom > 0 ? formatCost(cost / denom) : "n/a";
+      const toolErrorRate = toolCalls > 0 ? (toolErrors / toolCalls) * 100 : 0;
+
+      const goalRows = Object.entries(goalCost)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12)
+        .map(([k, v]) => `  ${k.replace(/_/g, " ").padEnd(28)} ${formatCost(v).padStart(10)}  ${fmtPct(cost > 0 ? (v / cost) * 100 : 0)}`);
+
+      const scope = input.project ? `project: ${input.project}` : "all projects";
+      const window = cutoff ? `last ${input.days}d` : "all time";
+      const text = [
+        `Productivity ROI (${scope}, ${window})`,
+        ``,
+        `Sessions (with meta): ${sessions}`,
+        `Total cost:           ${formatCost(cost)}`,
+        ``,
+        `── Cost per unit of work ─────────────────────────────`,
+        `  Per commit:        ${per(commits)}   (${commits} commits, ${pushes} pushes)`,
+        `  Per file modified: ${per(files)}   (${files} files)`,
+        `  Per 100 lines:     ${linesChanged > 0 ? formatCost((cost / linesChanged) * 100) : "n/a"}   (+${fmtTokens(linesAdded)} / −${fmtTokens(linesRemoved)})`,
+        `  Lines per dollar:  ${cost > 0 ? Math.round(linesChanged / cost) : "n/a"}`,
+        `  Per active minute: ${per(duration)}   (${Math.round(duration)} min total)`,
+        `  Per session:       ${per(sessions)}`,
+        ``,
+        `── Tool Reliability ──────────────────────────────────`,
+        `  Tool calls: ${fmtTokens(toolCalls)}   errors: ${toolErrors}  (${fmtPct(toolErrorRate)} error rate)`,
+        ``,
+        `── Spend by Goal Category ────────────────────────────`,
+        ...(goalRows.length === 0 ? ["  (no goal-category data)"] : goalRows),
+      ].join("\n");
+
+      return { content: [{ type: "text", text }] };
     }
   );
 

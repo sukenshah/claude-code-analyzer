@@ -182,10 +182,10 @@ describe("cutoffDate", () => {
 // ─── Tool registration ────────────────────────────────────────────────────────
 
 describe("registerTools", () => {
-  test("registers exactly 11 tools", () => {
+  test("registers exactly 13 tools", () => {
     const server = new MockServer();
     registerTools(server as unknown as McpServer);
-    expect(server.registered().length).toBe(11);
+    expect(server.registered().length).toBe(13);
   });
 
   test("registers expected tool names, no forecast tool", () => {
@@ -202,6 +202,8 @@ describe("registerTools", () => {
     expect(names).toContain("get_compaction_stats");
     expect(names).toContain("get_context_limit_stats");
     expect(names).toContain("get_active_sessions");
+    expect(names).toContain("get_efficiency_insights");
+    expect(names).toContain("get_productivity_roi");
     expect(names).toContain("refresh_cache");
     expect(names).not.toContain("get_cost_forecast");
   });

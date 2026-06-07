@@ -7,7 +7,11 @@ import type { TurnRecord, SessionRecord, ProjectRecord, GlobalSummary, SessionMe
 
 export type { TurnRecord, SessionRecord, ProjectRecord, GlobalSummary };
 export type { TokenUsage, CostBreakdown, DailyStats, ScanEntry, ClaudeMdFile, ClaudeMdSummary, SessionMeta, CompactEvent } from "./types.js";
-export { calculateCost, sumUsage, sumCost, formatCost } from "./cost.js";
+export { calculateCost, sumUsage, sumCost, formatCost, estimateCacheMissCost } from "./cost.js";
+export { buildEfficiencyInsights } from "./analytics.js";
+export type {
+  EfficiencyInsights, CadenceStats, TemporalBucket, CacheMissReasonRow,
+} from "./analytics.js";
 export { getProjectName, getProjectPath, scanProjects, extractProjectPaths, resolveClaudeProjectsDir, getCandidateClaudeProjectsDirs } from "./scanner.js";
 export { readConfig, writeConfig } from "./config.js";
 export type { AnalyzerConfig } from "./config.js";
@@ -109,20 +113,7 @@ export async function analyze(forceRefresh = false): Promise<AnalysisResult> {
 
     // Merge metadata across files belonging to the same session (main + subagents)
     const existing = metaBySession.get(entry.sessionId);
-    metaBySession.set(entry.sessionId, existing
-      ? { ...existing,
-          aiTitle: existing.aiTitle ?? meta.aiTitle,
-          entrypoint: existing.entrypoint ?? meta.entrypoint,
-          gitBranch: existing.gitBranch ?? meta.gitBranch,
-          permissionMode: existing.permissionMode ?? meta.permissionMode,
-          version: existing.version ?? meta.version,
-          mcpTools: [...new Set([...existing.mcpTools, ...meta.mcpTools])],
-          compactEvents: [...existing.compactEvents, ...meta.compactEvents]
-            .sort((a, b) => a.timestamp.localeCompare(b.timestamp)),
-          limitHitCount: (existing.limitHitCount ?? 0) + (meta.limitHitCount ?? 0),
-        }
-      : meta
-    );
+    metaBySession.set(entry.sessionId, existing ? mergeMeta(existing, meta) : meta);
   }
 
   const projectPaths = extractProjectPaths(entries);

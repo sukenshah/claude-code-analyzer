@@ -69,6 +69,22 @@ interface QualityData {
     totalInterruptions: number;
     totalToolErrors: number;
   };
+  roi: {
+    totalCost: number;
+    costPerCommit: number;
+    costPerFileModified: number;
+    costPer100Lines: number;
+    linesPerDollar: number;
+    costPerMinute: number;
+    costPerSession: number;
+  };
+  toolReliability: {
+    totalToolCalls: number;
+    totalToolErrors: number;
+    errorRatePct: number;
+  };
+  costByGoalCategory: Array<{ name: string; cost: number }>;
+  costByLanguage: Array<{ name: string; cost: number }>;
   outcomeCounts: Record<string, number>;
   helpfulnessCounts: Record<string, number>;
   sessionTypeCounts: Record<string, number>;
@@ -271,6 +287,68 @@ export function QualityReport() {
             </div>
           </div>
 
+          {/* ROI — spend reframed as value delivered */}
+          {data.roi.totalCost > 0 && (
+            <section className="card">
+              <h2>Return on Investment</h2>
+              <p className="section-desc">
+                Spend reframed as value delivered — total cost ({fmtCost(data.roi.totalCost)} across sessions
+                with activity metadata) divided by the work produced. A rough efficiency read, not an exact one.
+              </p>
+              <div className="stat-grid">
+                <div className="stat-card">
+                  <span className="stat-value">{fmtCost(data.roi.costPerCommit)}</span>
+                  <span className="stat-label">Cost / commit</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">{fmtCost(data.roi.costPerFileModified)}</span>
+                  <span className="stat-label">Cost / file changed</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">{fmtCost(data.roi.costPer100Lines)}</span>
+                  <span className="stat-label">Cost / 100 lines</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">{Math.round(data.roi.linesPerDollar)}</span>
+                  <span className="stat-label">Lines / dollar</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">{fmtCost(data.roi.costPerMinute)}</span>
+                  <span className="stat-label">Cost / active minute</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">{fmtCost(data.roi.costPerSession)}</span>
+                  <span className="stat-label">Cost / session</span>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Tool reliability */}
+          {data.toolReliability.totalToolCalls > 0 && (
+            <section className="card">
+              <h2>Tool Reliability</h2>
+              <p className="section-desc">
+                How often tool calls failed (non-zero Bash exit, edit that didn&apos;t apply, etc.) across all
+                sessions with metadata.
+              </p>
+              <div className="stat-grid">
+                <div className="stat-card">
+                  <span className="stat-value">{fmtNum(data.toolReliability.totalToolCalls)}</span>
+                  <span className="stat-label">Tool calls</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">{data.toolReliability.totalToolErrors}</span>
+                  <span className="stat-label">Tool errors</span>
+                </div>
+                <div className="stat-card">
+                  <span className="stat-value">{data.toolReliability.errorRatePct.toFixed(1)}%</span>
+                  <span className="stat-label">Error rate</span>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* How metrics are calculated */}
           <CollapsibleCard title="How these metrics are calculated">
             <p className="section-desc">
@@ -403,6 +481,11 @@ export function QualityReport() {
           <Distribution title="Session Type" counts={data.sessionTypeCounts} />
           <Distribution title="Primary Success Mode" counts={data.primarySuccessCounts} />
           <Distribution title="Friction Types" counts={data.frictionCounts} />
+          <Distribution
+            title="User Satisfaction"
+            counts={data.satisfactionCounts}
+            positive={new Set(["satisfied", "very_satisfied", "likely_satisfied"])}
+          />
 
           {/* Friction detail feed */}
           {data.frictionFeed.length > 0 && (
@@ -459,6 +542,62 @@ export function QualityReport() {
               </table>
             </section>
           )}
+
+          {/* Cost by goal category + language */}
+          <div className="quality-two-col">
+            {data.costByGoalCategory.length > 0 && (
+              <section className="card">
+                <h2>Spend by Goal Category</h2>
+                <p className="section-desc">Session cost split across goal types, weighted by each session&apos;s category mix.</p>
+                <table className="table">
+                  <tbody>
+                    {data.costByGoalCategory.map((g0) => {
+                      const max = data.costByGoalCategory[0]?.cost ?? 1;
+                      return (
+                        <tr key={g0.name}>
+                          <td style={{ width: "45%" }}>{prettify(g0.name)}</td>
+                          <td>
+                            <div className="model-cost-cell">
+                              <span>{fmtCost(g0.cost)}</span>
+                              <div className="model-share-bar-track">
+                                <div className="model-share-bar-fill" style={{ width: `${(g0.cost / max) * 100}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </section>
+            )}
+            {data.costByLanguage.length > 0 && (
+              <section className="card">
+                <h2>Spend by Language</h2>
+                <p className="section-desc">Session cost split across languages, weighted by files touched per session.</p>
+                <table className="table">
+                  <tbody>
+                    {data.costByLanguage.map((l) => {
+                      const max = data.costByLanguage[0]?.cost ?? 1;
+                      return (
+                        <tr key={l.name}>
+                          <td style={{ width: "45%" }}>{l.name}</td>
+                          <td>
+                            <div className="model-cost-cell">
+                              <span>{fmtCost(l.cost)}</span>
+                              <div className="model-share-bar-track">
+                                <div className="model-share-bar-fill" style={{ width: `${(l.cost / max) * 100}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </section>
+            )}
+          </div>
 
           {/* Tools + languages side by side */}
           <div className="quality-two-col">

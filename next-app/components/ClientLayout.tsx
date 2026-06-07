@@ -61,6 +61,14 @@ function SunIcon() {
   );
 }
 
+function EfficiencyIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
 function QualityIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -126,6 +134,9 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
             </Link>
             <Link href="/quality" className="btn-theme" aria-label="Session Quality" title="Session Quality">
               <QualityIcon />
+            </Link>
+            <Link href="/efficiency" className="btn-theme" aria-label="Efficiency Insights" title="Efficiency Insights">
+              <EfficiencyIcon />
             </Link>
             <Link href="/plans" className="btn-theme" aria-label="Plans" title="Plans">
               <PlansIcon />
