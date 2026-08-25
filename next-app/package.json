@@ -10,7 +10,7 @@
   "dependencies": {
     "@claude-analyzer/analyzer": "*",
     "marked": "^18.0.2",
-    "next": "^15.0.0",
+    "next": "^15.5.23",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -11,7 +11,8 @@
     "vitest": "^4.1.0"
   },
   "overrides": {
-    "postcss": "^8.5.10"
+    "postcss": "^8.5.26",
+    "sharp": "^0.35.3"
   },
   "scripts": {
     "build": "npm run build -w packages/analyzer && npm run build -w packages/mcp && npm run build -w next-app",
