@@ -32,6 +32,18 @@ export interface TurnRecord {
   // Ephemeral cache-creation split by TTL bucket (from usage.cache_creation).
   ephemeral5mTokens: number;
   ephemeral1hTokens: number;
+  // API response id (message.id); one response spans several JSONL lines. Null if absent.
+  messageId: string | null;
+  // Thinking tokens (usage.output_tokens_details.thinking_tokens), a subset of output_tokens.
+  thinkingTokens: number;
+  // Prompt this turn answers (latest user-line promptId) and that prompt's origin
+  // (human, peer, task_notification, scheduled, auto_continuation, coordinator, ...).
+  promptId: string | null;
+  promptOrigin: string | null;
+  // tool_use blocks across all lines of this API response.
+  toolUseCount: number;
+  // Reasoning effort level on the assistant line (e.g. "high").
+  effort: string | null;
 }
 
 export interface SessionRecord {
@@ -99,6 +111,23 @@ export interface SessionMeta {
   hookDurationMs: number;
   // Count of queue-operation (enqueue) records — user queued messages while Claude was busy.
   queuedMessages: number;
+  // System-generated enqueues (task notifications, agent messages) and mid-turn absorbed removals.
+  queuedSystemMessages: number;
+  queueAbsorbedMidTurn: number;
+  // Permission decisions keyed `${decision}/${source}`.
+  permissionDecisions: Record<string, number>;
+  // Bash tool results that timed out / persisted large output to disk.
+  bashTimeouts: number;
+  bashLargeOutputs: number;
+  // Client-generated API error notices ("API Error ...", isApiErrorMessage).
+  apiErrorCount: number;
+  // Per-turn wall-clock durations from system/turn_duration records.
+  turnDurationsMs: number[];
+  // Every assistant tool_use by tool name, and tool_result is_error counts by tool name.
+  toolCalls: Record<string, number>;
+  toolErrors: Record<string, number>;
+  // User-line toolDenialKind counts (automode-blocked, permission-rule, user-rejected, ...).
+  permissionDenials: Record<string, number>;
 }
 
 export interface ScanEntry {

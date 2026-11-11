@@ -1,54 +1,128 @@
 import type { CostBreakdown, TokenUsage } from "./types.js";
 
-interface ModelPricing {
+// NOTE: this module must import types only (no fs / sqlite) so it can be bundled client-side
+// via the "@claude-analyzer/analyzer/cost" subpath export.
+
+export interface ModelPricing {
   input: number;
   output: number;
-  cacheWrite: number;
+  cacheWrite5m: number;
+  cacheWrite1h: number;
   cacheRead: number;
 }
 
-const PRICING: Record<string, ModelPricing> = {
-  // Claude 4.x
-  "claude-sonnet-4-6": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
-  "claude-sonnet-4-5": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
-  "claude-haiku-4-5":  { input: 0.80, output: 4, cacheWrite: 1, cacheRead: 0.08 },
-  "claude-haiku-4-5-20251001": { input: 0.80, output: 4, cacheWrite: 1, cacheRead: 0.08 },
-  "claude-opus-4-8":   { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.50 },
-  "claude-opus-4-7":   { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.50 },
-  "claude-opus-4-5":   { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.50 },
-  // Claude 3.5
-  "claude-3-5-sonnet-20241022": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
-  "claude-3-5-sonnet-20240620": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
-  "claude-3-5-haiku-20241022":  { input: 0.80, output: 4, cacheWrite: 1, cacheRead: 0.08 },
-  // Claude 3 — significantly different pricing; haiku especially must not fall through to 4.5 rates
-  "claude-3-opus-20240229":  { input: 15, output: 75, cacheWrite: 18.75, cacheRead: 1.50 },
-  "claude-3-sonnet-20240229": { input: 3, output: 15, cacheWrite: 3.75, cacheRead: 0.30 },
-  "claude-3-haiku-20240307":  { input: 0.25, output: 1.25, cacheWrite: 0.30, cacheRead: 0.03 },
-};
-
-const DEFAULT_PRICING = PRICING["claude-sonnet-4-6"];
-
-function getPricing(model: string): ModelPricing {
-  if (PRICING[model]) return PRICING[model];
-  // Fuzzy match: find by prefix
-  for (const [key, pricing] of Object.entries(PRICING)) {
-    if (model.startsWith(key) || key.startsWith(model)) return pricing;
-  }
-  // Claude 3 Haiku has much lower pricing than later haiku models — must not conflate
-  if (model.includes("haiku")) {
-    if (/claude-3-haiku/.test(model)) return PRICING["claude-3-haiku-20240307"]!;
-    return PRICING["claude-haiku-4-5"]!;
-  }
-  if (model.includes("opus")) return PRICING["claude-opus-4-8"]!;
-  return DEFAULT_PRICING;
+export interface CacheSplit {
+  ephemeral5m: number;
+  ephemeral1h: number;
 }
 
-export function calculateCost(usage: TokenUsage, model: string): CostBreakdown {
-  const p = getPricing(model);
+// [input, output, cacheRead] in USD per million tokens.
+const RATES: Record<string, [number, number, number]> = {
+  "claude-fable-5-2": [8, 40, 0.2],
+  "claude-mythos-5-2": [8, 40, 0.2],
+  "claude-fable-5-1": [10, 50, 0.25],
+  "claude-mythos-5-1": [10, 50, 0.25],
+  "claude-fable-5": [10, 50, 1],
+  "claude-mythos-5": [10, 50, 1],
+  "claude-opus-5-5": [4, 20, 0.2],
+  "claude-opus-5": [5, 25, 0.5],
+  "claude-opus-4-8": [5, 25, 0.5],
+  "claude-opus-4-7": [5, 25, 0.5],
+  "claude-opus-4-6": [5, 25, 0.5],
+  "claude-opus-4-5": [5, 25, 0.5],
+  "claude-opus-4-1": [15, 75, 1.5],
+  "claude-opus-4-0": [15, 75, 1.5],
+  "claude-opus-4-2025": [15, 75, 1.5],
+  "claude-3-opus": [15, 75, 1.5],
+  "claude-sonnet-5-5": [2, 10, 0.1],
+  "claude-sonnet-5": [2, 10, 0.2],
+  "claude-sonnet-4-6": [3, 15, 0.3],
+  "claude-sonnet-4-5": [3, 15, 0.3],
+  "claude-sonnet-4-0": [3, 15, 0.3],
+  "claude-sonnet-4-2025": [3, 15, 0.3],
+  "claude-3-7-sonnet": [3, 15, 0.3],
+  "claude-3-5-sonnet": [3, 15, 0.3],
+  "claude-3-sonnet": [3, 15, 0.3],
+  "claude-haiku-5-5": [0.1, 0.5, 0.01],
+  "claude-haiku-4-5": [1, 5, 0.1],
+  "claude-3-5-haiku": [0.8, 4, 0.08],
+  "claude-3-haiku": [0.25, 1.25, 0.03],
+};
+
+const FAMILY_FALLBACK: Array<[string, string]> = [
+  ["fable", "claude-fable-5-2"],
+  ["mythos", "claude-fable-5-2"],
+  ["opus", "claude-opus-5-5"],
+  ["sonnet", "claude-sonnet-5-5"],
+  ["haiku", "claude-haiku-5-5"],
+];
+const DEFAULT_KEY = "claude-sonnet-5-5";
+
+// Claude Haiku 5.5 charges 5x when a single request's prompt exceeds this many tokens.
+const HAIKU_55_LONG_PROMPT_THRESHOLD = 100_000;
+const HAIKU_55_LONG_PROMPT_MULTIPLIER = 5;
+
+const SORTED_KEYS = Object.keys(RATES).sort((a, b) => b.length - a.length);
+
+function resolveKey(model: string): { key: string; known: boolean } {
+  if (RATES[model]) return { key: model, known: true };
+  for (const key of SORTED_KEYS) {
+    if (model.startsWith(key)) return { key, known: true };
+  }
+  for (const [kw, key] of FAMILY_FALLBACK) {
+    if (model.includes(kw)) return { key, known: false };
+  }
+  return { key: DEFAULT_KEY, known: false };
+}
+
+function toPricing(key: string, multiplier = 1): ModelPricing {
+  const [input, output, cacheRead] = RATES[key]!;
+  return {
+    input: input * multiplier,
+    output: output * multiplier,
+    cacheWrite5m: input * 1.25 * multiplier,
+    cacheWrite1h: input * 2 * multiplier,
+    cacheRead: cacheRead * multiplier,
+  };
+}
+
+const ZERO_PRICING: ModelPricing = { input: 0, output: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0 };
+
+/** True only for exact or prefix hits in the pricing table (not family fallbacks). */
+export function isKnownModel(model: string): boolean {
+  return resolveKey(model).known;
+}
+
+/** Base-tier pricing for a model (USD per million tokens). `<synthetic>` is zero. */
+export function getModelPricing(model: string): ModelPricing {
+  if (model === "<synthetic>") return ZERO_PRICING;
+  return toPricing(resolveKey(model).key);
+}
+
+function pricingForRequest(usage: TokenUsage, model: string): ModelPricing {
+  if (model === "<synthetic>") return ZERO_PRICING;
+  const { key } = resolveKey(model);
+  if (key === "claude-haiku-5-5") {
+    const prompt = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens;
+    if (prompt > HAIKU_55_LONG_PROMPT_THRESHOLD) return toPricing(key, HAIKU_55_LONG_PROMPT_MULTIPLIER);
+  }
+  return toPricing(key);
+}
+
+export function calculateCost(usage: TokenUsage, model: string, cacheSplit?: CacheSplit): CostBreakdown {
+  const p = pricingForRequest(usage, model);
   const M = 1_000_000;
   const inputCost = (usage.input_tokens / M) * p.input;
   const outputCost = (usage.output_tokens / M) * p.output;
-  const cacheWriteCost = (usage.cache_creation_input_tokens / M) * p.cacheWrite;
+  let cacheWriteCost: number;
+  if (cacheSplit) {
+    const h1 = cacheSplit.ephemeral1h;
+    const covered = cacheSplit.ephemeral5m + h1;
+    const m5 = cacheSplit.ephemeral5m + Math.max(0, usage.cache_creation_input_tokens - covered);
+    cacheWriteCost = (m5 / M) * p.cacheWrite5m + (h1 / M) * p.cacheWrite1h;
+  } else {
+    cacheWriteCost = (usage.cache_creation_input_tokens / M) * p.cacheWrite5m;
+  }
   const cacheReadCost = (usage.cache_read_input_tokens / M) * p.cacheRead;
   return {
     inputCost,
@@ -59,13 +133,17 @@ export function calculateCost(usage: TokenUsage, model: string): CostBreakdown {
   };
 }
 
+/** Total USD for a usage priced on a given model (5m cache-write rate). */
+export function simulateCost(usage: TokenUsage, model: string): number {
+  return calculateCost(usage, model).totalCost;
+}
+
 // Estimate the dollars wasted by a cache miss: tokens that should have been billed at the
-// cheap cache-read rate were instead re-billed at the cache-write (creation) rate. The waste
-// is the rate delta on those tokens.
+// cheap cache-read rate were instead re-billed at the cache-write (creation) rate.
 export function estimateCacheMissCost(missTokens: number, model: string): number {
   if (missTokens <= 0) return 0;
-  const p = getPricing(model);
-  return (missTokens / 1_000_000) * (p.cacheWrite - p.cacheRead);
+  const p = getModelPricing(model);
+  return (missTokens / 1_000_000) * (p.cacheWrite5m - p.cacheRead);
 }
 
 export function sumUsage(usages: TokenUsage[]): TokenUsage {

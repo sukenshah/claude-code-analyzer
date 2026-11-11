@@ -28,6 +28,16 @@ export function mergeMeta(a: SessionMeta, b: SessionMeta): SessionMeta {
     hookErrors: (a.hookErrors ?? 0) + (b.hookErrors ?? 0),
     hookDurationMs: (a.hookDurationMs ?? 0) + (b.hookDurationMs ?? 0),
     queuedMessages: (a.queuedMessages ?? 0) + (b.queuedMessages ?? 0),
+    queuedSystemMessages: (a.queuedSystemMessages ?? 0) + (b.queuedSystemMessages ?? 0),
+    queueAbsorbedMidTurn: (a.queueAbsorbedMidTurn ?? 0) + (b.queueAbsorbedMidTurn ?? 0),
+    permissionDecisions: mergeToolCallCounts(a.permissionDecisions ?? {}, b.permissionDecisions ?? {}),
+    bashTimeouts: (a.bashTimeouts ?? 0) + (b.bashTimeouts ?? 0),
+    bashLargeOutputs: (a.bashLargeOutputs ?? 0) + (b.bashLargeOutputs ?? 0),
+    apiErrorCount: (a.apiErrorCount ?? 0) + (b.apiErrorCount ?? 0),
+    turnDurationsMs: [...(a.turnDurationsMs ?? []), ...(b.turnDurationsMs ?? [])],
+    toolCalls: mergeToolCallCounts(a.toolCalls ?? {}, b.toolCalls ?? {}),
+    toolErrors: mergeToolCallCounts(a.toolErrors ?? {}, b.toolErrors ?? {}),
+    permissionDenials: mergeToolCallCounts(a.permissionDenials ?? {}, b.permissionDenials ?? {}),
   };
 }
 

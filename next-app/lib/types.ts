@@ -24,6 +24,8 @@ export interface TurnRecord {
   cost: CostBreakdown;
   isSubagent: boolean;
   agentId: string | null;
+  messageId?: string | null;
+  thinkingTokens?: number;
 }
 
 export interface SessionMeta {
@@ -36,6 +38,11 @@ export interface SessionMeta {
   mcpToolCalls: Record<string, number>;
   compactEvents: CompactEvent[];
   limitHitCount: number;
+  apiErrorCount?: number;
+  turnDurationsMs?: number[];
+  toolCalls?: Record<string, number>;
+  toolErrors?: Record<string, number>;
+  permissionDenials?: Record<string, number>;
 }
 
 export interface CompactEvent {

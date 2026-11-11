@@ -189,10 +189,10 @@ export function Dashboard() {
               <ul>
                 <li><strong>Input tokens</strong> — tokens in your prompt sent to the model.</li>
                 <li><strong>Output tokens</strong> — tokens the model generated in its reply.</li>
-                <li><strong>Cache write</strong> — tokens written into the prompt cache for reuse.</li>
+                <li><strong>Cache write</strong> — tokens written into the prompt cache for reuse (1-hour writes are priced at 2× input, 5-minute writes at 1.25×).</li>
                 <li><strong>Cache read</strong> — tokens read back from the cache (much cheaper than re-sending input).</li>
               </ul>
-              <p className="modal-example">Example: a session with 50K input tokens on Sonnet 4.6 costs roughly $0.15 in input charges alone ($3 per million tokens).</p>
+              <p className="modal-example">Example: 50K input tokens at a $3 per million rate costs roughly $0.15 in input charges alone. Models priced: Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.2.</p>
             </>
           )}
         </InfoModal>
@@ -200,7 +200,7 @@ export function Dashboard() {
 
       {modal === "turns" && (
         <InfoModal title="Turns" onClose={() => setModal(null)}>
-          <p>A turn is one assistant response — every time Claude replied to a message, that counts as one turn.</p>
+          <p>A turn is one API response — every time Claude replied, that counts as one turn. Turns are de-duplicated by API message id, so a response streamed in several log entries is counted once.</p>
           <p>A single session typically contains many turns: one per user message plus any tool calls Claude made autonomously.</p>
           <p className="modal-example">Example: asking Claude to "write tests, run them, and fix failures" might produce 8–15 turns as it iterates.</p>
         </InfoModal>

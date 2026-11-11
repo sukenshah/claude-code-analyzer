@@ -151,7 +151,7 @@ export function SessionPage() {
           <div className="stat-value small">{session.lastTimestamp.slice(0, 16).replace("T", " ")}</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Turns</div>
+          <div className="stat-label">API turns</div>
           <div className="stat-value">{topLevelTurns.length}</div>
         </div>
         <div className="stat-card">
@@ -194,6 +194,18 @@ export function SessionPage() {
             <div className="meta-row">
               <span className="meta-label">Permission mode</span>
               <span className="meta-value">{session.meta.permissionMode}</span>
+            </div>
+          )}
+          {(session.meta.apiErrorCount ?? 0) > 0 && (
+            <div className="meta-row">
+              <span className="meta-label">API errors</span>
+              <span className="meta-value">{session.meta.apiErrorCount}</span>
+            </div>
+          )}
+          {(session.meta.turnDurationsMs?.length ?? 0) > 0 && (
+            <div className="meta-row">
+              <span className="meta-label">Median turn duration</span>
+              <span className="meta-value">{fmtDurMs(medianOf(session.meta.turnDurationsMs ?? []))}</span>
             </div>
           )}
           {session.meta.version && (
@@ -348,6 +360,16 @@ function SubagentSection({ agentId, turns, showTurns }: { agentId: string; turns
 
 const TRUNCATE_AT = 500;
 
+function medianOf(xs: number[]): number {
+  const a = [...xs].sort((x, y) => x - y);
+  const m = Math.floor(a.length / 2);
+  return a.length % 2 ? a[m]! : (a[m - 1]! + a[m]!) / 2;
+}
+function fmtDurMs(ms: number): string {
+  if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)} min`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 function MessageList({ messages, turnByUuid, promptStatsMap }: {
   messages: RawMessage[];
   turnByUuid: Map<string, TurnRecord>;
@@ -392,7 +414,7 @@ function PromptStatsChip({ stats }: { stats: PromptStats }) {
       )}
       <span className="msg-prompt-divider" />
       {stats.turnCount > 1 && (
-        <span className="msg-prompt-turns">{stats.turnCount} turns</span>
+        <span className="msg-prompt-turns">{stats.turnCount} API turns</span>
       )}
       <span className="msg-prompt-cost">{fmtCost(stats.cost)}</span>
     </div>

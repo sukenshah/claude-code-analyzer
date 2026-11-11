@@ -188,7 +188,7 @@ export function ProjectPage() {
             <tr>
               <th>Session</th>
               <th>Date</th>
-              <th>Turns</th>
+              <th>API turns</th>
               <th>Input</th>
               <th>Output</th>
               <th>Cache Read</th>

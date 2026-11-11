@@ -9,6 +9,11 @@ import { emptyMeta } from "./parser.js";
 const DB_DIR = join(homedir(), ".claude-analyzer");
 const DB_PATH = join(DB_DIR, "cache.db");
 
+// Bump when parsing or pricing changes so stale cached rows are dropped and files re-parsed.
+// v3: promptId/origin/toolUseCount/effort turn fields, queue/permission/bash meta.
+// v2: message.id dedup, new pricing table, new turn/meta fields.
+const SCHEMA_VERSION = 3;
+
 let db: Database.Database | null = null;
 
 function getDb(): Database.Database {
@@ -17,6 +22,11 @@ function getDb(): Database.Database {
   db = new Database(DB_PATH);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  const currentVersion = db.pragma("user_version", { simple: true }) as number;
+  if (currentVersion !== SCHEMA_VERSION) {
+    db.exec("DROP TABLE IF EXISTS turns; DROP TABLE IF EXISTS parsed_files;");
+    db.pragma(`user_version = ${SCHEMA_VERSION}`);
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS parsed_files (
       path        TEXT PRIMARY KEY,
@@ -47,7 +57,13 @@ function getDb(): Database.Database {
       ephemeral_1h       INTEGER DEFAULT 0,
       is_subagent        INTEGER DEFAULT 0,
       agent_id           TEXT,
-      source_file        TEXT NOT NULL
+      source_file        TEXT NOT NULL,
+      message_id         TEXT,
+      thinking_tokens    INTEGER DEFAULT 0,
+      prompt_id          TEXT,
+      prompt_origin      TEXT,
+      tool_use_count     INTEGER DEFAULT 0,
+      effort             TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_turns_session   ON turns(session_id);
@@ -63,6 +79,12 @@ function getDb(): Database.Database {
     "ALTER TABLE turns ADD COLUMN cache_miss_reason TEXT",
     "ALTER TABLE turns ADD COLUMN ephemeral_5m INTEGER DEFAULT 0",
     "ALTER TABLE turns ADD COLUMN ephemeral_1h INTEGER DEFAULT 0",
+    "ALTER TABLE turns ADD COLUMN message_id TEXT",
+    "ALTER TABLE turns ADD COLUMN thinking_tokens INTEGER DEFAULT 0",
+    "ALTER TABLE turns ADD COLUMN prompt_id TEXT",
+    "ALTER TABLE turns ADD COLUMN prompt_origin TEXT",
+    "ALTER TABLE turns ADD COLUMN tool_use_count INTEGER DEFAULT 0",
+    "ALTER TABLE turns ADD COLUMN effort TEXT",
   ]) {
     try { db.exec(ddl); } catch { /* already exists */ }
   }
@@ -100,12 +122,14 @@ export function saveTurns(
       (uuid, session_id, project_key, parent_uuid, timestamp, model,
        input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
        cache_miss_tokens, cache_miss_reason, ephemeral_5m, ephemeral_1h,
-       is_subagent, agent_id, source_file)
+       is_subagent, agent_id, source_file, message_id, thinking_tokens,
+       prompt_id, prompt_origin, tool_use_count, effort)
     VALUES
       (@uuid, @session_id, @project_key, @parent_uuid, @timestamp, @model,
        @input_tokens, @output_tokens, @cache_write_tokens, @cache_read_tokens,
        @cache_miss_tokens, @cache_miss_reason, @ephemeral_5m, @ephemeral_1h,
-       @is_subagent, @agent_id, @source_file)
+       @is_subagent, @agent_id, @source_file, @message_id, @thinking_tokens,
+       @prompt_id, @prompt_origin, @tool_use_count, @effort)
   `);
 
   d.transaction(() => {
@@ -139,6 +163,12 @@ export function saveTurns(
         is_subagent: turn.isSubagent ? 1 : 0,
         agent_id: turn.agentId,
         source_file: turn.sourceFile,
+        message_id: turn.messageId,
+        thinking_tokens: turn.thinkingTokens,
+        prompt_id: turn.promptId ?? null,
+        prompt_origin: turn.promptOrigin ?? null,
+        tool_use_count: turn.toolUseCount ?? 0,
+        effort: turn.effort ?? null,
       });
     }
   })();
@@ -154,6 +184,8 @@ export function loadCachedTurns(filePath: string): TurnRecord[] {
       cache_miss_tokens: number | null; cache_miss_reason: string | null;
       ephemeral_5m: number | null; ephemeral_1h: number | null;
       is_subagent: number; agent_id: string | null; source_file: string;
+      message_id: string | null; thinking_tokens: number | null;
+      prompt_id: string | null; prompt_origin: string | null; tool_use_count: number | null; effort: string | null;
     }>;
 
   return rows.map((r) => {
@@ -171,7 +203,10 @@ export function loadCachedTurns(filePath: string): TurnRecord[] {
       timestamp: r.timestamp,
       model: r.model,
       usage,
-      cost: calculateCost(usage, r.model),
+      cost: calculateCost(usage, r.model, {
+        ephemeral5m: r.ephemeral_5m ?? 0,
+        ephemeral1h: r.ephemeral_1h ?? 0,
+      }),
       isSubagent: r.is_subagent === 1,
       agentId: r.agent_id,
       sourceFile: r.source_file,
@@ -179,6 +214,12 @@ export function loadCachedTurns(filePath: string): TurnRecord[] {
       cacheMissReason: r.cache_miss_reason ?? null,
       ephemeral5mTokens: r.ephemeral_5m ?? 0,
       ephemeral1hTokens: r.ephemeral_1h ?? 0,
+      messageId: r.message_id ?? null,
+      thinkingTokens: r.thinking_tokens ?? 0,
+      promptId: r.prompt_id ?? null,
+      promptOrigin: r.prompt_origin ?? null,
+      toolUseCount: r.tool_use_count ?? 0,
+      effort: r.effort ?? null,
     };
   });
 }
@@ -196,6 +237,16 @@ export function loadCachedMeta(filePath: string): SessionMeta {
     parsed.hookErrors = parsed.hookErrors ?? 0;
     parsed.hookDurationMs = parsed.hookDurationMs ?? 0;
     parsed.queuedMessages = parsed.queuedMessages ?? 0;
+    parsed.queuedSystemMessages = parsed.queuedSystemMessages ?? 0;
+    parsed.queueAbsorbedMidTurn = parsed.queueAbsorbedMidTurn ?? 0;
+    parsed.permissionDecisions = parsed.permissionDecisions ?? {};
+    parsed.bashTimeouts = parsed.bashTimeouts ?? 0;
+    parsed.bashLargeOutputs = parsed.bashLargeOutputs ?? 0;
+    parsed.apiErrorCount = parsed.apiErrorCount ?? 0;
+    parsed.turnDurationsMs = parsed.turnDurationsMs ?? [];
+    parsed.toolCalls = parsed.toolCalls ?? {};
+    parsed.toolErrors = parsed.toolErrors ?? {};
+    parsed.permissionDenials = parsed.permissionDenials ?? {};
     return parsed;
   } catch { return emptyMeta(); }
 }

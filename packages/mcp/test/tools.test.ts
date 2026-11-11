@@ -64,6 +64,21 @@ const EMPTY_META: SessionMeta = {
   mcpTools: [],
   compactEvents: [],
   limitHitCount: 0,
+  mcpToolCalls: {},
+  hookInvocations: 0,
+  hookErrors: 0,
+  hookDurationMs: 0,
+  queuedMessages: 0,
+  apiErrorCount: 0,
+  turnDurationsMs: [],
+  toolCalls: {},
+  toolErrors: {},
+  permissionDenials: {},
+  permissionDecisions: {},
+  bashTimeouts: 0,
+  bashLargeOutputs: 0,
+  queuedSystemMessages: 0,
+  queueAbsorbedMidTurn: 0,
 };
 const EMPTY_CLAUDE_MD: ClaudeMdSummary = {
   files: [],
@@ -84,6 +99,12 @@ function makeTurn(overrides: Partial<TurnRecord> = {}): TurnRecord {
     isSubagent: false,
     agentId: null,
     sourceFile: "/fake/path.jsonl",
+    messageId: null,
+    thinkingTokens: 0,
+    promptId: null,
+    promptOrigin: null,
+    toolUseCount: 0,
+    effort: null,
     ...overrides,
   };
 }
@@ -223,7 +244,7 @@ describe("get_usage_summary", () => {
   test("shows session and turn counts", async () => {
     const text = await server.text("get_usage_summary", { days: 0 });
     expect(text).toMatch(/Sessions:\s+1/);
-    expect(text).toMatch(/Turns.*:\s+1/);
+    expect(text).toMatch(/API turns.*:\s+1/);
   });
 
   test("shows estimated cost", async () => {
@@ -243,7 +264,7 @@ describe("get_usage_summary", () => {
     result.allTurns.push(makeTurn({ uuid: "old", timestamp: "2020-01-01T00:00:00.000Z" }));
     setCachedResult(result);
 
-    expect(await server.text("get_usage_summary", { days: 0 })).toMatch(/Turns.*:\s+2/);
+    expect(await server.text("get_usage_summary", { days: 0 })).toMatch(/API turns.*:\s+2/);
   });
 
   test("project filter narrows to matching turns", async () => {
@@ -251,7 +272,7 @@ describe("get_usage_summary", () => {
     result.allTurns.push(makeTurn({ uuid: "other", projectKey: "Users-work-git-otherproject", sessionId: "session-other" }));
     setCachedResult(result);
 
-    expect(await server.text("get_usage_summary", { days: 0, project: "myproject" })).toMatch(/Turns.*:\s+1/);
+    expect(await server.text("get_usage_summary", { days: 0, project: "myproject" })).toMatch(/API turns.*:\s+1/);
   });
 
   test("no-match filter returns no-data message", async () => {
@@ -457,5 +478,121 @@ describe("get_session_detail", () => {
 
   test("shows cache hit rate", async () => {
     expect(await server.text("get_session_detail", { session_id: sessionId, include_turns: false })).toMatch(/cache hit rate/);
+  });
+});
+
+// ─── efficiency / model / detail additions ───────────────────────────────────
+
+describe("get_efficiency_insights new sections", () => {
+  test("omits new sections when no data", async () => {
+    const server = new MockServer();
+    registerTools(server as unknown as McpServer);
+    setCachedResult(makeResult());
+    const text = await server.text("get_efficiency_insights", {});
+    expect(text).not.toMatch(/Turn Duration|Thinking Tokens|Tool Reliability|Permission Denials|API Errors/);
+  });
+
+  test("renders new sections when data present", async () => {
+    const server = new MockServer();
+    registerTools(server as unknown as McpServer);
+    const session = makeSession({
+      turns: [makeTurn({ thinkingTokens: 100 })],
+      meta: {
+        ...EMPTY_META,
+        apiErrorCount: 2,
+        turnDurationsMs: [1000, 3000, 5000],
+        toolCalls: { Bash: 10, Read: 5 },
+        toolErrors: { Bash: 2 },
+        permissionDenials: { "user-rejected": 3 },
+      },
+    });
+    setCachedResult(makeResult({ sessions: new Map([[session.sessionId, session]]), allTurns: session.turns }));
+    const text = await server.text("get_efficiency_insights", {});
+    expect(text).toMatch(/Turn Duration/);
+    expect(text).toMatch(/Thinking Tokens/);
+    expect(text).toMatch(/Tool Reliability/);
+    expect(text).toMatch(/Bash/);
+    expect(text).toMatch(/Permission Denials/);
+    expect(text).toMatch(/API Errors/);
+  });
+});
+
+describe("get_efficiency_insights prompt/context/permission sections", () => {
+  test("renders context, prompt, origin, effort, permission, bash, queue sections", async () => {
+    const server = new MockServer();
+    registerTools(server as unknown as McpServer);
+    const turns = [
+      makeTurn({ uuid: "a", promptId: "p1", promptOrigin: "human", toolUseCount: 2, effort: "high" }),
+      makeTurn({ uuid: "b", promptId: "p2", promptOrigin: "scheduled", toolUseCount: 1, effort: "low" }),
+    ];
+    const session = makeSession({
+      turns,
+      meta: {
+        ...EMPTY_META,
+        toolCalls: { Bash: 4 },
+        bashTimeouts: 1,
+        bashLargeOutputs: 2,
+        queuedMessages: 3,
+        queuedSystemMessages: 5,
+        queueAbsorbedMidTurn: 1,
+        permissionDecisions: { auto: 6, manual: 3, rejected: 1 },
+      },
+    });
+    setCachedResult(makeResult({ sessions: new Map([[session.sessionId, session]]), allTurns: turns }));
+    const text = await server.text("get_efficiency_insights", {});
+    expect(text).toMatch(/Context Size/);
+    expect(text).toMatch(/Cost per Prompt/);
+    expect(text).toMatch(/Spend by Origin/);
+    expect(text).toMatch(/scheduled/);
+    expect(text).toMatch(/task_notification = background task finished/);
+    expect(text).toMatch(/Spend by Effort Level/);
+    expect(text).toMatch(/high/);
+    expect(text).toMatch(/User-typed queued: 3/);
+    expect(text).toMatch(/System messages queued: 5\s+absorbed mid-turn: 1/);
+    expect(text).toMatch(/Bash Health/);
+    expect(text).toMatch(/outputs too large to keep inline/);
+  });
+
+  test("omits new sections when no prompt data", async () => {
+    const server = new MockServer();
+    registerTools(server as unknown as McpServer);
+    setCachedResult(makeResult());
+    const text = await server.text("get_efficiency_insights", {});
+    expect(text).not.toMatch(/Cost per Prompt|Bash Health|── Permissions/);
+  });
+});
+
+describe("get_model_breakdown simulator", () => {
+  test("compares current models and flags unknown pricing", async () => {
+    const server = new MockServer();
+    registerTools(server as unknown as McpServer);
+    const turns = [makeTurn({ uuid: "a", model: "claude-sonnet-5-5" }), makeTurn({ uuid: "b", model: "claude-mystery-9" })];
+    const session = makeSession({ turns });
+    setCachedResult(makeResult({ sessions: new Map([[session.sessionId, session]]), allTurns: turns }));
+    const text = await server.text("get_model_breakdown", {});
+    for (const m of ["haiku-5-5", "sonnet-5-5", "opus-5-5", "fable-5-2"]) expect(text).toContain(m);
+    expect(text).toMatch(/mystery-9 \(estimated pricing\)/);
+    expect(text).not.toMatch(/4-6/);
+  });
+});
+
+describe("labels and session detail meta", () => {
+  test("usage summary says API turns", async () => {
+    const server = new MockServer();
+    registerTools(server as unknown as McpServer);
+    setCachedResult(makeResult());
+    const text = await server.text("get_usage_summary", {});
+    expect(text).toMatch(/API turns/);
+    expect(text).not.toMatch(/prompts/);
+  });
+
+  test("session detail shows API errors and median duration", async () => {
+    const server = new MockServer();
+    registerTools(server as unknown as McpServer);
+    const session = makeSession({ meta: { ...EMPTY_META, apiErrorCount: 4, turnDurationsMs: [2000, 4000, 6000] } });
+    setCachedResult(makeResult({ sessions: new Map([[session.sessionId, session]]) }));
+    const text = await server.text("get_session_detail", { session_id: session.sessionId });
+    expect(text).toMatch(/API errors: 4/);
+    expect(text).toMatch(/median: 4\.0s|median:? *4\.0s/i);
   });
 });

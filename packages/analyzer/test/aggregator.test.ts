@@ -274,3 +274,33 @@ describe("buildGlobalSummary", () => {
     expect(summary.byModel).toEqual({});
   });
 });
+
+describe("mergeMeta new fields", () => {
+  test("merges api errors, durations, tool and denial counts", async () => {
+    const { mergeMeta } = await import("../src/aggregator.js");
+    const { emptyMeta: em } = await import("../src/parser.js");
+    const a = { ...em(), apiErrorCount: 1, turnDurationsMs: [10], toolCalls: { Bash: 2 }, toolErrors: { Bash: 1 }, permissionDenials: { x: 1 } };
+    const b = { ...em(), apiErrorCount: 2, turnDurationsMs: [20], toolCalls: { Bash: 1, Read: 4 }, toolErrors: { Read: 1 }, permissionDenials: { x: 2, y: 1 } };
+    const m = mergeMeta(a, b);
+    expect(m.apiErrorCount).toBe(3);
+    expect(m.turnDurationsMs).toEqual([10, 20]);
+    expect(m.toolCalls).toEqual({ Bash: 3, Read: 4 });
+    expect(m.toolErrors).toEqual({ Bash: 1, Read: 1 });
+    expect(m.permissionDenials).toEqual({ x: 3, y: 1 });
+  });
+});
+
+describe("mergeMeta prompt/queue/permission fields", () => {
+  test("sums and merges new counters", async () => {
+    const { mergeMeta } = await import("../src/aggregator.js");
+    const { emptyMeta: em } = await import("../src/parser.js");
+    const a = { ...em(), queuedSystemMessages: 1, queueAbsorbedMidTurn: 2, bashTimeouts: 1, bashLargeOutputs: 4, permissionDecisions: { "accept/config": 1 } };
+    const b = { ...em(), queuedSystemMessages: 2, queueAbsorbedMidTurn: 1, bashTimeouts: 2, bashLargeOutputs: 1, permissionDecisions: { "accept/config": 2, "reject/user_reject": 1 } };
+    const m = mergeMeta(a, b);
+    expect(m.queuedSystemMessages).toBe(3);
+    expect(m.queueAbsorbedMidTurn).toBe(3);
+    expect(m.bashTimeouts).toBe(3);
+    expect(m.bashLargeOutputs).toBe(5);
+    expect(m.permissionDecisions).toEqual({ "accept/config": 3, "reject/user_reject": 1 });
+  });
+});

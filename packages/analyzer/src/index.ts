@@ -7,10 +7,12 @@ import type { TurnRecord, SessionRecord, ProjectRecord, GlobalSummary, SessionMe
 
 export type { TurnRecord, SessionRecord, ProjectRecord, GlobalSummary };
 export type { TokenUsage, CostBreakdown, DailyStats, ScanEntry, ClaudeMdFile, ClaudeMdSummary, SessionMeta, CompactEvent } from "./types.js";
-export { calculateCost, sumUsage, sumCost, formatCost, estimateCacheMissCost } from "./cost.js";
+export { calculateCost, sumUsage, sumCost, formatCost, estimateCacheMissCost, getModelPricing, isKnownModel, simulateCost } from "./cost.js";
+export type { ModelPricing, CacheSplit } from "./cost.js";
 export { buildEfficiencyInsights } from "./analytics.js";
 export type {
-  EfficiencyInsights, CadenceStats, TemporalBucket, CacheMissReasonRow,
+  EfficiencyInsights, CadenceStats, TemporalBucket, CacheMissReasonRow, ToolReliabilityRow, PermissionDenialRow,
+  ContextBucketRow, ContextTopSessionRow, OriginRow, EffortRow,
 } from "./analytics.js";
 export { getProjectName, getProjectPath, scanProjects, extractProjectPaths, resolveClaudeProjectsDir, getCandidateClaudeProjectsDirs } from "./scanner.js";
 export { readConfig, writeConfig } from "./config.js";
@@ -20,8 +22,14 @@ export type ActiveSessionRecord = SessionRecord & { lastModifiedMs: number };
 
 function dedupTurnsByUuid(turns: TurnRecord[]): TurnRecord[] {
   const seen = new Map<string, TurnRecord>();
+  const seenMsgIds = new Set<string>();
   for (const turn of turns) {
-    if (!seen.has(turn.uuid)) seen.set(turn.uuid, turn);
+    if (seen.has(turn.uuid)) continue;
+    if (turn.messageId) {
+      if (seenMsgIds.has(turn.messageId)) continue;
+      seenMsgIds.add(turn.messageId);
+    }
+    seen.set(turn.uuid, turn);
   }
   return [...seen.values()];
 }

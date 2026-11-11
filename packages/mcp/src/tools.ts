@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { analyze, formatCost, calculateCost, getActiveSessions, buildEfficiencyInsights } from "@claude-analyzer/analyzer";
+import { analyze, formatCost, simulateCost, isKnownModel, getActiveSessions, buildEfficiencyInsights } from "@claude-analyzer/analyzer";
 import type { AnalysisResult } from "@claude-analyzer/analyzer";
 
 let cachedResult: AnalysisResult | null = null;
@@ -151,7 +151,7 @@ export function registerTools(server: McpServer): void {
         `Usage Summary (${scope}, ${window})`,
         ``,
         `Sessions:         ${sessions.size}`,
-        `Turns (prompts):  ${turns.length}`,
+        `API turns:        ${turns.length}`,
         ``,
         `Tokens:`,
         `  Input:          ${fmtTokens(inputT)}`,
@@ -276,7 +276,7 @@ export function registerTools(server: McpServer): void {
   server.registerTool(
     "get_session_detail",
     {
-      description: "Get full detail for a session including token breakdown and optional per-turn stats.",
+      description: "Get full detail for a session including token breakdown, API errors and median turn duration (when recorded), and optional per-API-turn stats.",
       inputSchema: {
         session_id: z.string().describe("Session UUID (or first 8 chars)"),
         include_turns: z.boolean().optional().default(false).describe("Include per-turn token breakdown (can be verbose)"),
@@ -310,6 +310,15 @@ export function registerTools(server: McpServer): void {
         ``,
         `Estimated Cost: ${formatCost(session.totalCost)}`,
       ];
+
+      const apiErrs = session.meta.apiErrorCount ?? 0;
+      if (apiErrs > 0) lines.push(`API errors: ${apiErrs}`);
+      const durs = [...(session.meta.turnDurationsMs ?? [])].sort((a, b) => a - b);
+      if (durs.length > 0) {
+        const mid = durs.length >> 1;
+        const med = durs.length % 2 ? durs[mid] : (durs[mid - 1] + durs[mid]) / 2;
+        lines.push(`Turn duration median: ${(med / 1000).toFixed(1)}s  (${durs.length} turns timed)`);
+      }
 
       if (input.include_turns) {
         lines.push(``, `Per-Turn Breakdown:`);
@@ -435,10 +444,11 @@ export function registerTools(server: McpServer): void {
     {
       description:
         "Show cost and token share per model, plus a cost simulator showing what your usage would have cost " +
-        "on a different model (default: claude-sonnet-4-6). Useful for identifying if you're over-spending on Opus.",
+        "on a different model (default: claude-sonnet-5-5) and a comparison across current models (haiku-5-5, sonnet-5-5, opus-5-5, fable-5-2) using analyzer pricing. " +
+        "Models without known pricing are marked (estimated pricing).",
       inputSchema: {
-        compare_to: z.string().optional().default("claude-sonnet-4-6")
-          .describe("Model to simulate costs against (default: claude-sonnet-4-6)."),
+        compare_to: z.string().optional().default("claude-sonnet-5-5")
+          .describe("Model to simulate costs against (default: claude-sonnet-5-5)."),
         days: z.number().optional().default(0).describe("Lookback window in days (default 0 = all time)."),
       },
     },
@@ -470,7 +480,10 @@ export function registerTools(server: McpServer): void {
       const totalCost = [...byModel.values()].reduce((s, e) => s + e.actualCost, 0);
       const totalTokens = [...byModel.values()].reduce((s, e) => s + e.input + e.output + e.cacheWrite + e.cacheRead, 0);
 
-      const compareTo = input.compare_to ?? "claude-sonnet-4-6";
+      const compareTo = input.compare_to ?? "claude-sonnet-5-5";
+      const usageOf = (e: { input: number; output: number; cacheWrite: number; cacheRead: number }) => ({
+        input_tokens: e.input, output_tokens: e.output, cache_creation_input_tokens: e.cacheWrite, cache_read_input_tokens: e.cacheRead,
+      });
 
       // Sort by actual cost descending
       const rows = [...byModel.entries()]
@@ -480,27 +493,27 @@ export function registerTools(server: McpServer): void {
           const costPct = totalCost > 0 ? (e.actualCost / totalCost * 100).toFixed(1) : "0.0";
           const tokenPct = totalTokens > 0 ? (tokens / totalTokens * 100).toFixed(1) : "0.0";
 
-          const simCost = calculateCost(
-            { input_tokens: e.input, output_tokens: e.output, cache_creation_input_tokens: e.cacheWrite, cache_read_input_tokens: e.cacheRead },
-            compareTo
-          ).totalCost;
+          const simCost = simulateCost(usageOf(e), compareTo);
           const savings = e.actualCost - simCost;
           const isCompareTo = model === compareTo || model.startsWith(compareTo);
           const simStr = isCompareTo ? "  (baseline)" : `  → ${formatCost(simCost)} on ${compareTo.replace("claude-", "")}  ${savings > 0.01 ? `saves ${formatCost(savings)}` : savings < -0.01 ? `costs ${formatCost(-savings)} more` : "≈ same"}`;
 
           return [
-            `  ${model.replace("claude-", "").padEnd(32)} ${formatCost(e.actualCost).padStart(10)}  ${costPct.padStart(5)}%  ${fmtTokens(tokens).padStart(7)} tokens  ${tokenPct.padStart(5)}%`,
+            `  ${(model.replace("claude-", "") + (isKnownModel(model) ? "" : " (estimated pricing)")).padEnd(32)} ${formatCost(e.actualCost).padStart(10)}  ${costPct.padStart(5)}%  ${fmtTokens(tokens).padStart(7)} tokens  ${tokenPct.padStart(5)}%`,
             `  ${"".padEnd(32)} ${simStr}`,
           ].join("\n");
         });
 
       const simTotal = [...byModel.entries()].reduce((s, [, e]) => {
-        return s + calculateCost(
-          { input_tokens: e.input, output_tokens: e.output, cache_creation_input_tokens: e.cacheWrite, cache_read_input_tokens: e.cacheRead },
-          compareTo
-        ).totalCost;
+        return s + simulateCost(usageOf(e), compareTo);
       }, 0);
       const totalSavings = totalCost - simTotal;
+
+      const compareModels = ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2"];
+      const compareRows = compareModels.map((m) => {
+        const tot = [...byModel.values()].reduce((a, e) => a + simulateCost(usageOf(e), m), 0);
+        return `  ${(m.replace("claude-", "") + (isKnownModel(m) ? "" : " (estimated pricing)")).padEnd(32)} ${formatCost(tot).padStart(10)}  (${tot <= totalCost ? "-" : "+"}${totalCost > 0 ? (Math.abs(tot - totalCost) / totalCost * 100).toFixed(1) : "0.0"}% vs actual)`;
+      });
 
       const window = input.days && input.days > 0 ? `last ${input.days} days` : "all time";
       const text = [
@@ -519,6 +532,9 @@ export function registerTools(server: McpServer): void {
           : totalSavings < -0.01
           ? `  Additional cost:   ${formatCost(-totalSavings)}  (${(-totalSavings / totalCost * 100).toFixed(1)}% more expensive)`
           : `  Cost is approximately the same.`,
+        ``,
+        `── Same usage on current models ──────────────────────`,
+        ...compareRows,
       ].join("\n");
 
       return { content: [{ type: "text", text }] };
@@ -905,7 +921,8 @@ export function registerTools(server: McpServer): void {
         "Token/time efficiency insights derived from session turns: cache-miss waste (tokens lost to " +
         "prompt-cache invalidation + $ wasted, by reason), subagent cost share, model switching within " +
         "sessions, turn cadence, hour-of-day/weekday usage, ephemeral cache TTL split, hook overhead, and " +
-        "queued-message count. Use to find where tokens and time leak.",
+        "user-typed queued-message count (plus system messages / absorbed mid-turn), context-size distribution and cost, " +
+        "cost per prompt, spend by prompt origin and effort level, permission decisions, bash health, API turn duration, thinking-token share, tool reliability, permission denials, and API errors. Use to find where tokens and time leak.",
       inputSchema: {
         project: z.string().optional().describe("Project name/path substring to filter. Omit for all projects."),
         days: z.number().optional().default(0).describe("Lookback window in days (default 0 = all time)."),
@@ -942,6 +959,100 @@ export function registerTools(server: McpServer): void {
       const weekdayRows = ins.byWeekday
         .map((w) => `  ${w.label}  ${String(w.turns).padStart(5)} turns  ${formatCost(w.cost).padStart(9)}`);
 
+      const extra: string[] = [];
+      const td = ins.turnDuration;
+      if (td && td.count > 0) {
+        extra.push(
+          `── Turn Duration (wall-clock per turn) ───────────────`,
+          `  Turns timed: ${td.count}   median: ${fmtSec(td.medianMs / 1000)}   p90: ${fmtSec(td.p90Ms / 1000)}   total: ${(td.totalMs / 3_600_000).toFixed(1)}h`,
+          ``
+        );
+      }
+      const th = ins.thinking;
+      if (th && th.thinkingTokens > 0) {
+        extra.push(
+          `── Thinking Tokens ───────────────────────────────────`,
+          `  Thinking: ${fmtTokens(th.thinkingTokens)} of ${fmtTokens(th.outputTokens)} output tokens  (${fmtPct(th.share * 100)})   est. cost: ${formatCost(th.estimatedCost)}`,
+          ``
+        );
+      }
+      if (ins.toolReliability && ins.toolReliability.length > 0) {
+        extra.push(
+          `── Tool Reliability ──────────────────────────────────`,
+          `  Overall error rate: ${fmtPct(ins.toolErrorRate)}`,
+          ...[...ins.toolReliability].sort((a, b) => b.calls - a.calls).slice(0, 8)
+            .map((r) => `    ${r.tool.slice(0, 30).padEnd(30)} ${String(r.errors).padStart(5)} errors / ${String(r.calls).padStart(6)} calls  (${fmtPct(r.errorRate)})`),
+          ``
+        );
+      }
+      if (ins.permissionDenials && ins.permissionDenials.length > 0) {
+        extra.push(
+          `── Permission Denials ────────────────────────────────`,
+          ...ins.permissionDenials.map((d) => `  ${d.kind.replace(/_/g, " ").padEnd(24)} ${d.count}`),
+          ``
+        );
+      }
+      if (ins.apiErrors > 0) {
+        extra.push(`── API Errors ────────────────────────────────────────`, `  Total: ${ins.apiErrors}`, ``);
+      }
+
+      const ctx = ins.context;
+      if (ctx && ctx.maxTokens > 0) {
+        extra.push(
+          `── Context Size ──────────────────────────────────────`,
+          `  Median: ${fmtTokens(ctx.medianTokens)}   p90: ${fmtTokens(ctx.p90Tokens)}   max: ${fmtTokens(ctx.maxTokens)}`,
+          `  Cache-read cost: ${formatCost(ctx.cacheReadCost)}  (${fmtPct(ctx.cacheReadCostShare * 100)} of spend)`,
+          ...ctx.buckets.filter((b) => b.turns > 0)
+            .map((b) => `    ${b.label.padEnd(14)} ${String(b.turns).padStart(6)} turns  ${formatCost(b.cost).padStart(9)}  avg ${formatCost(b.avgCostPerTurn)}/turn`),
+          ...(ctx.topSessions.length > 0
+            ? [`  Top sessions by peak context:`, ...ctx.topSessions.slice(0, 3)
+                .map((t) => `    ${t.sessionId.slice(0, 8)}  ${t.projectName.slice(0, 24).padEnd(24)} peak ${fmtTokens(t.peakTokens)}  ${t.turns} turns  ${formatCost(t.cost)}`)]
+            : []),
+          ``
+        );
+      }
+      const pr = ins.prompts;
+      if (pr && pr.count > 0) {
+        extra.push(
+          `── Cost per Prompt ───────────────────────────────────`,
+          `  Prompts: ${pr.count}   cost median: ${formatCost(pr.medianCost)}   p90: ${formatCost(pr.p90Cost)}   max: ${formatCost(pr.maxCost)}`,
+          `  API turns per prompt: median ${pr.medianApiTurns}  p90 ${pr.p90ApiTurns}   tool calls per prompt: median ${pr.medianToolCalls}  p90 ${pr.p90ToolCalls}`,
+          ...(pr.unattributedTurns > 0 ? [`  Unattributed: ${pr.unattributedTurns} turns (${formatCost(pr.unattributedCost)}) not tied to a prompt`] : []),
+          ``
+        );
+      }
+      if (ins.byOrigin && ins.byOrigin.length > 0) {
+        extra.push(
+          `── Spend by Origin ───────────────────────────────────`,
+          ...ins.byOrigin.map((o) => `  ${o.origin.padEnd(18)} ${String(o.prompts).padStart(6)} prompts  ${String(o.turns).padStart(6)} turns  ${formatCost(o.cost).padStart(9)}  ${fmtPct(o.costShare * 100)}`),
+          `  (human = typed by user, peer = message from another agent/session, task_notification = background task finished, scheduled = cron/scheduled task)`,
+          ``
+        );
+      }
+      if (ins.byEffort && ins.byEffort.length > 0) {
+        extra.push(
+          `── Spend by Effort Level ─────────────────────────────`,
+          ...ins.byEffort.map((e) => `  ${e.effort.padEnd(12)} ${String(e.turns).padStart(6)} turns  ${formatCost(e.cost).padStart(9)}  ${fmtTokens(e.outputTokens)} output  ${fmtPct(e.costShare * 100)}`),
+          ``
+        );
+      }
+      const pm = ins.permissions;
+      if (pm && pm.total > 0) {
+        extra.push(
+          `── Permissions ───────────────────────────────────────`,
+          `  Decisions: ${pm.total}   auto-approved: ${pm.autoApproved}   manually approved: ${pm.manualApproved} (${fmtPct(pm.manualRate)})   rejected: ${pm.rejected}`,
+          ``
+        );
+      }
+      const bh = ins.bashHealth;
+      if (bh && bh.calls > 0) {
+        extra.push(
+          `── Bash Health ───────────────────────────────────────`,
+          `  Calls: ${bh.calls}   timeouts: ${bh.timeouts} (${fmtPct(bh.timeoutRate)})   outputs too large to keep inline: ${bh.largeOutputs}`,
+          ``
+        );
+      }
+
       const scope = input.project ? `project: ${input.project}` : "all projects";
       const window = cutoff ? `last ${input.days}d` : "all time";
       const text = [
@@ -972,9 +1083,11 @@ export function registerTools(server: McpServer): void {
         `── Hook Overhead ─────────────────────────────────────`,
         `  Invocations:  ${hooks.totalInvocations}   errors: ${hooks.totalErrors} (${fmtPct(hooks.errorRate)})   total time: ${(hooks.totalDurationMs / 1000).toFixed(1)}s   avg: ${hooks.avgDurationMs.toFixed(0)}ms`,
         ``,
-        `── Queued Messages (impatience) ──────────────────────`,
-        `  Total queued: ${ins.queue.totalQueued}   across ${ins.queue.sessionsWithQueue} sessions`,
+        `── Queued Messages (user-typed, impatience) ──────────`,
+        `  User-typed queued: ${ins.queue.totalQueued}   across ${ins.queue.sessionsWithQueue} sessions`,
+        `  System messages queued: ${ins.queue.systemMessages}   absorbed mid-turn: ${ins.queue.absorbedMidTurn}`,
         ``,
+        ...extra,
         `── Usage by Weekday ──────────────────────────────────`,
         ...weekdayRows,
         ``,
