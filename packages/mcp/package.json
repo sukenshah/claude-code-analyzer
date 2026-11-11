@@ -12,8 +12,8 @@
   },
   "dependencies": {
     "@claude-analyzer/analyzer": "*",
-    "@modelcontextprotocol/sdk": "^1.10.2",
-    "zod": "^3.23.0"
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
